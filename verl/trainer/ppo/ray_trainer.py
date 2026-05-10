@@ -244,7 +244,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
             gamma=gamma,
             lam=lam,
             entropys=entropys,
-            topk_percent=config.sapo_topk_percent, 
+            topk_percent=config.sapo_topk_percent,
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
@@ -1138,7 +1138,7 @@ class RayPPOTrainer:
                     # update critic
                     if self.use_critic:
                         with marked_timer("update_critic", timing_raw, color="pink"):
-                            batch.batch['entropys'] = entropys
+                            batch.batch["entropys"] = entropys
                             critic_output = self.critic_wg.update_critic(batch)
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)

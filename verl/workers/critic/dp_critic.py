@@ -240,14 +240,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     # assert not torch.any(torch.isnan(vpreds)).item()
 
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(
-                        vpreds=vpreds,
-                        values=values,
-                        returns=returns,
-                        response_mask=response_mask,
-                        cliprange_value=self.config.cliprange_value,
-                        loss_agg_mode=self.config.loss_agg_mode,
-                        entropys=entropys,
-                        topk_percent=self.config.ppo_critic_entropy_topk_percent
+                        vpreds=vpreds, values=values, returns=returns, response_mask=response_mask, cliprange_value=self.config.cliprange_value, loss_agg_mode=self.config.loss_agg_mode, entropys=entropys, topk_percent=self.config.ppo_critic_entropy_topk_percent
                     )
                     if self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz

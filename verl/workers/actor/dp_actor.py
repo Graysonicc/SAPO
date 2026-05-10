@@ -483,7 +483,7 @@ class DataParallelPPOActor(BasePPOActor):
                             clip_ratio_c=clip_ratio_c,
                             loss_agg_mode=loss_agg_mode,
                             entropys=entropys,
-                            topk_percent=self.config.ppo_actor_entropy_topk_percent
+                            topk_percent=self.config.ppo_actor_entropy_topk_percent,
                         )
                     else:
                         policy_loss_fn = get_policy_loss_fn(loss_mode)

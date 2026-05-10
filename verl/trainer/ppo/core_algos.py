@@ -20,12 +20,12 @@ implement PPO-like algorithms.
 
 __all__ = ["register_adv_est", "get_adv_estimator_fn", "AdvantageEstimator"]
 
+import math
 from collections import defaultdict
 from enum import Enum
 
 import numpy as np
 import torch
-import math
 
 import verl.utils.torch_functional as verl_F
 
@@ -154,12 +154,12 @@ def get_kl_controller(kl_ctrl):
 
 @register_adv_est(AdvantageEstimator.SAPO)
 def compute_sapo_advantage_return(
-    token_level_rewards: torch.Tensor,   # [bs, len]
-    values: torch.Tensor,                # [bs, len]
-    response_mask: torch.Tensor,         # [bs, len]
+    token_level_rewards: torch.Tensor,  # [bs, len]
+    values: torch.Tensor,  # [bs, len]
+    response_mask: torch.Tensor,  # [bs, len]
     gamma: torch.Tensor,
     lam: torch.Tensor,
-    entropys: torch.Tensor = None,        # [bs, len]
+    entropys: torch.Tensor = None,  # [bs, len]
     topk_percent: float = 30.0,
 ):
     """
@@ -230,9 +230,7 @@ def compute_sapo_advantage_return(
             ).squeeze(-1)
 
             if end_idxs.numel() == 0 or int(end_idxs[-1]) != valid_len - 1:
-                end_idxs = torch.cat(
-                    [end_idxs, torch.tensor([valid_len - 1], device=device)]
-                )
+                end_idxs = torch.cat([end_idxs, torch.tensor([valid_len - 1], device=device)])
 
             starts = []
             prev = -1
@@ -244,7 +242,7 @@ def compute_sapo_advantage_return(
             seg_values = []
 
             for s, e in zip(starts, end_idxs.tolist()):
-                r = token_level_rewards[b, s:e + 1] * response_mask[b, s:e + 1]
+                r = token_level_rewards[b, s : e + 1] * response_mask[b, s : e + 1]
                 seg_rewards.append(r.sum())
                 seg_values.append(values[b, e])
 
@@ -266,8 +264,8 @@ def compute_sapo_advantage_return(
                 end_idxs.tolist(),
                 seg_values,
             ):
-                advantages[b, s:e + 1] = adv
-                new_values[b, s:e + 1] = v
+                advantages[b, s : e + 1] = adv
+                new_values[b, s : e + 1] = v
 
             advantages[b, :valid_len] *= response_mask[b, :valid_len]
             new_values[b, :valid_len] *= response_mask[b, :valid_len]
@@ -689,9 +687,9 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
 
 # for sapo
 def segment_mean_by_entropy_topk_inclusive(
-    x: torch.Tensor,              # [bs, T] e.g. negative_approx_kl
+    x: torch.Tensor,  # [bs, T] e.g. negative_approx_kl
     response_mask: torch.Tensor,  # [bs, T]
-    entropys: torch.Tensor,       # [bs, T]
+    entropys: torch.Tensor,  # [bs, T]
     topk_percent: float = 30.0,
 ) -> torch.Tensor:
     """
@@ -1017,10 +1015,10 @@ def compute_entropy_loss(logits, response_mask, loss_agg_mode: str = "token-mean
 
 # for sapo
 def compute_value_loss(
-    vpreds: torch.Tensor,           # [bs, len]
-    returns: torch.Tensor,          # [bs, len]
-    values: torch.Tensor,           # [bs, len]
-    response_mask: torch.Tensor,    # [bs, len]
+    vpreds: torch.Tensor,  # [bs, len]
+    returns: torch.Tensor,  # [bs, len]
+    values: torch.Tensor,  # [bs, len]
+    response_mask: torch.Tensor,  # [bs, len]
     cliprange_value: float,
     loss_agg_mode: str = "token-mean",
     entropys: torch.Tensor = None,  # [bs, len]
