@@ -198,7 +198,12 @@ class MultiTurnSFTDataset(Dataset):
         Returns:
             Tuple of (input_ids, loss_mask, attention_mask) as tensors
         """
-        full_tokens_list = full_tokens.tolist()
+        if hasattr(full_tokens, "tolist"):
+            full_tokens_list = full_tokens.tolist()
+        elif hasattr(full_tokens, "ids"):
+            full_tokens_list = list(full_tokens.ids)
+        else:
+            full_tokens_list = list(full_tokens)
 
         if len(concat_tokens) != len(full_tokens_list) or not all(a == b for a, b in zip(concat_tokens, full_tokens_list)):
             logging.warning(
