@@ -34,6 +34,7 @@ Train the SAPO with script:
 cd SAPO
 bash examples/ppo_trainer/run_sapo.sh
 ```
+You can view the training and testing curves by launching TensorBoard.
 
 ## Citation
 If you find this code useful for your research, please cite the following paper.
