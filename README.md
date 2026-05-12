@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧩 Segment-Aligned Policy Optimization for Multi-Modal Reasoning
+# 🧩 Segment-Aligned Policy Optimization for Multi-Modal Reasoning (ICML2026)
 
 <p>
   <a href="https://github.com/Graysonicc/SAPO/tree/main">
