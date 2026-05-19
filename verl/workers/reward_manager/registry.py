@@ -12,16 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable
-
-from verl.workers.reward_manager.abstract import AbstractRewardManager
-
 __all__ = ["register", "get_reward_manager_cls"]
 
-REWARD_MANAGER_REGISTRY: dict[str, type[AbstractRewardManager]] = {}
+REWARD_MANAGER_REGISTRY = {}
 
 
-def register(name: str) -> Callable[[type[AbstractRewardManager]], type[AbstractRewardManager]]:
+def register(name):
     """Decorator to register a reward manager class with a given name.
 
     Args:
@@ -29,18 +25,16 @@ def register(name: str) -> Callable[[type[AbstractRewardManager]], type[Abstract
             The name of the reward manager.
     """
 
-    def decorator(cls: type[AbstractRewardManager]) -> type[AbstractRewardManager]:
+    def decorator(cls):
         if name in REWARD_MANAGER_REGISTRY and REWARD_MANAGER_REGISTRY[name] != cls:
-            raise ValueError(
-                f"Reward manager {name} has already been registered: {REWARD_MANAGER_REGISTRY[name]} vs {cls}"
-            )
+            raise ValueError(f"Reward manager {name} has already been registered: {REWARD_MANAGER_REGISTRY[name]} vs {cls}")
         REWARD_MANAGER_REGISTRY[name] = cls
         return cls
 
     return decorator
 
 
-def get_reward_manager_cls(name: str) -> type[AbstractRewardManager]:
+def get_reward_manager_cls(name):
     """Get the reward manager class with a given name.
 
     Args:

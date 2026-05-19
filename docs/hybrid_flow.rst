@@ -2,8 +2,6 @@
 HybridFlow Programming Guide
 =========================================================
 
-Last updated: 06/02/2025.
-
 .. _vermouth: https://github.com/vermouth1992
 
 Author: `Chi Zhang <https://github.com/vermouth1992>`_
@@ -91,7 +89,7 @@ Codebase walkthrough (PPO)
 
 Entry function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Code: https://github.com/verl-project/verl/blob/main/verl/trainer/main_ppo.py
+Code: https://github.com/volcengine/verl/blob/main/verl/trainer/main_ppo.py
 
 In this file, we define a remote function `main_task` that serves as the controller (driver) process as shown in the above figure. We also define a ``RewardManager``, where users can customize their reward function based on the data source in the dataset. Note that `RewardManager` should return the final token-level reward that is optimized by RL algorithms. Note that users can combine model-based rewards and rule-based rewards.
 The ``main_task`` constructs a RayPPOTrainer instance and launch the fit. Note that ``main_task`` **runs as a single process**.
@@ -100,7 +98,7 @@ We highly recommend that the ``main_task`` is NOT scheduled on the head of the r
 
 Ray trainer
 ~~~~~~~~~~~~~~~~~~~~
-Code: https://github.com/verl-project/verl/blob/main/verl/trainer/ppo/ray_trainer.py
+Code: https://github.com/volcengine/verl/blob/main/verl/trainer/ppo/ray_trainer.py
 
 The RayPPOTrainer manages 
 
@@ -117,7 +115,7 @@ Each worker inside the WorkerGroup runs on a GPU. The worker group serves as a p
 
 For example, in PPO, we define 3 worker groups:
 
-- ActorRolloutRef: manages actor, rollout and reference policy. ActorRolloutRefWorker can be instantiated as a single actor, a single rollout, a single reference policy, a combined actor/rollout or a combined actor/rollout/ref. This design is aimed for the maximum code reuse in various scenarios. The reason for colocating actor and rollout is for fast weight transfer using nccl. The reason for coloating actor and reference is to implement an efficient lora PPO as the reference policy is simply the base model of PPO in lora. The colocation is done via ``verl.single_controller.ray.base.create_colocated_worker_cls``, where it creates a single ray remote class exposing all class methods from these roles.
+- ActorRolloutRef: manages actor, rollout and reference policy. ActorRolloutRefWorker can be instantiated as a single actor, a single rollout, a single reference policy, a combined actor/rollout or a combined actor/rollout/ref. This design is aimed for the maximum code reuse in various scenarios. The reason for colocating actor and rollout is for fast weight transfer using nccl. The reason for coloating actor and reference is to implement an efficient lora PPO as the reference policy is simply the base model of PPO in lora.
 - Critic: manages the critic model
 - Reward: manages the reward model
 
@@ -126,9 +124,9 @@ The worker group will be constructed on the resource pool it designates. The res
 Worker definition
 ~~~~~~~~~~~~~~~~~~~~
 
-.. _ActorRolloutRefWorker: https://github.com/verl-project/verl/blob/main/verl/workers/engine_workers.py
+.. _ActorRolloutRefWorker: https://github.com/volcengine/verl/blob/main/verl/workers/fsdp_workers.py
 
-We take `ActorRolloutRefWorker <https://github.com/verl-project/verl/blob/main/verl/workers/engine_workers.py>`_ for an example.
+We take `ActorRolloutRefWorker <https://github.com/volcengine/verl/blob/main/verl/workers/fsdp_workers.py>`_ for an example.
 The APIs it should expose to the controller process are:
 
 - init_model: build the underlying model
@@ -174,7 +172,7 @@ In verl, we design a syntax sugar to encapsulate the 3 processes into a single c
    # on the driver
    output = actor_rollout_ref_wg.generate_sequences(data)
 
-We decorate the method of the worker with a ``register`` that explicitly defines how the input data should be split and dispatched to each worker, and how the output data should be collected and concatenated by the controller. For example, ``Dispatch.DP_COMPUTE_PROTO`` splits the input data into dp chunks, dispatch each data to each worker, collect the output and concatenate the results. Note that this function requires the input and output to be a DataProto defined here (https://github.com/verl-project/verl/blob/main/verl/protocol.py).
+We decorate the method of the worker with a ``register`` that explicitly defines how the input data should be split and dispatched to each worker, and how the output data should be collected and concatenated by the controller. For example, ``Dispatch.DP_COMPUTE_PROTO`` splits the input data into dp chunks, dispatch each data to each worker, collect the output and concatenate the results. Note that this function requires the input and output to be a DataProto defined here (https://github.com/volcengine/verl/blob/main/verl/protocol.py).
 
 
 PPO main loop
@@ -217,24 +215,31 @@ Important code files in the repository are organized as below:
        main_ppo.py  # the entrypoint for RL training
        ppo
          ray_trainer.py  # the training loop for RL algorithms such as PPO
-       sft_trainer.py  # the SFT trainer with FSDP backend
+       fsdp_sft_trainer.py  # the SFT trainer with FSDP backend
      config
        generation.yaml  # configuration template for rollout
        ppo_trainer.yaml  # configuration template for the RL trainer
      workers
        protocol.py  # the interface of DataProto
-       engine_workers.py  # unified ActorRolloutRefWorker / TrainingWorker implementations
-       engine
-         fsdp                  # FSDP / FSDP2 actor+critic engine implementations
-         megatron              # Megatron-LM actor+critic engine implementations
-         torchtitan            # torchtitan engine implementation
-         veomni                # veomni engine implementation
-         mcore                 # shared mcore helpers
+       fsdp_workers.py   # the FSDP worker interfaces: ActorRolloutRefWorker, CriticWorker, RewardModelWorker
+       megatron_workers.py  # the Megatron worker interfaces: ActorRolloutRefWorker, CriticWorker, RewardModelWorker
+       actor
+         dp_actor.py  #  data parallel actor with FSDP backend
+         megatron_actor.py  # nD parallel actor with Megatron backend
+       critic
+         dp_critic.py  # data parallel critic with FSDP backend
+         megatron_critic.py  # nD parallel critic with FSDP backend
+       reward_model
+         megatron
+           reward_model.py  # reward model with Megatron backend
        rollout
          vllm
            vllm_rollout.py  # rollout with vllm backend
          hf_rollout.py  # rollout with huggingface TGI backend
-         sglang_rollout        # rollout with SGLang backend
+       sharding_manager
+         fsdp_ulysses.py  # data and model resharding when using FSDP + ulysses
+         fsdp_vllm.py  # data and model resharding when using FSDP + ulysses + vllm
+         megatron_vllm.py  # data and model resharding when using Megatron + vllm
      utils
        dataset  # datasets for SFT/RM/RL
        reward_score  # function based reward
@@ -247,7 +252,12 @@ Important code files in the repository are organized as below:
        weight_loader_registery.py  # registry of weight loaders for loading hf ckpt into Megatron
      third_party
        vllm  # adaptor for vllm's usage in RL
-         vllm_spmd  # vllm >= v0.7 adaptor
+         vllm_v_0_6_3  # vllm v0.6.3 adaptor
+           llm.py  # entrypoints for generate, sync_model_weight, offload_model_weights
+           parallel_state.py  # vllm related device mesh and process groups
+           dtensor_weight_loaders.py  # weight loader for huggingface models with FSDP
+           megatron_weight_loaders.py  # weight loader for Megatron models
+         vllm_spmd  # vllm >= v0.7 adaptor (coming soon)
    examples  # example scripts
    tests  # integration and unit tests
    .github  # the configuration of continuous integration tests

@@ -19,11 +19,10 @@ import torch
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
 from verl.workers.reward_manager import register
-from verl.workers.reward_manager.abstract import AbstractRewardManager
 
 
 @register("dapo")
-class DAPORewardManager(AbstractRewardManager):
+class DAPORewardManager:
     """The reward manager."""
 
     def __init__(
@@ -43,25 +42,17 @@ class DAPORewardManager(AbstractRewardManager):
         self.max_resp_len = max_resp_len
 
         if self.overlong_buffer_cfg is not None:
-            assert self.max_resp_len is not None, (
-                f"max_resp_len must be provided if {overlong_buffer_cfg=}, but got None"
-            )
-            assert self.max_resp_len >= self.overlong_buffer_cfg.len, (
-                "max_resp_len must be larger than overlong_buffer.len"
-            )
-            assert not self.overlong_buffer_cfg.enable or self.overlong_buffer_cfg.len > 0, (
-                "overlong_buffer.len must be positive when overlong penalty is enabled,"
-                f"but got {self.overlong_buffer_cfg.len}."
-                "To disable the overlong penalty, set overlong_buffer.enable = False"
-            )
+            assert self.max_resp_len is not None, f"max_resp_len must be provided if {overlong_buffer_cfg=}, but got None"
 
     def __call__(self, data: DataProto, return_dict: bool = False):
         """We will expand this function gradually based on the available datasets"""
 
         # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
-        reward_from_rm_scores = self._extract_reward_from_rm_scores(data, return_dict)
-        if reward_from_rm_scores is not None:
-            return reward_from_rm_scores
+        if "rm_scores" in data.batch.keys():
+            if return_dict:
+                return {"reward_tensor": data.batch["rm_scores"]}
+            else:
+                return data.batch["rm_scores"]
 
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_extra_info = defaultdict(list)
@@ -93,11 +84,7 @@ class DAPORewardManager(AbstractRewardManager):
 
             data_source = data_item.non_tensor_batch[self.reward_fn_key]
 
-            extra_info = data_item.non_tensor_batch.get("extra_info", {})
-
-            rollout_reward_scores = data_item.non_tensor_batch.get("reward_scores", {})
-
-            extra_info["rollout_reward_scores"] = rollout_reward_scores
+            extra_info = data_item.non_tensor_batch.get("extra_info", None)
 
             result = self.compute_score(
                 data_source=data_source,
@@ -114,7 +101,6 @@ class DAPORewardManager(AbstractRewardManager):
                     reward_extra_info[key].append(value)
             else:
                 score = result
-                reward_extra_info["acc"].append(score)
 
             reward = score
 

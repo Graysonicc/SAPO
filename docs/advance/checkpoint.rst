@@ -1,9 +1,5 @@
-.. _checkpoint-page:
-
 Using Checkpoints to Support Fault Tolerance Training
 =====================================================
-
-Last updated: 03/22/2026.
 
 There could be training errors or machine failure during the whole RLHF training process, 
 so it is recommended to enable checkpoints to minimize your loss.
@@ -30,14 +26,12 @@ So the inner checkpoint structure of **FSDP** is like:
     checkpoints/${trainer.project_name}/${trainer.experiment_name}
     ├── global_steps_${i}
     │   ├── actor
-    │   │   ├── huggingface      # default save config and tokenizer, save huggingface model if include ``hf_model`` in checkpoint.contents
-    │   │   └── fsdp_config.json # FSDP config file, including world_size and fsdp version
+    │   │   ├── huggingface     # default save config and tokenizer, save huggingface model if include ``hf_model`` in checkpoint.contents
     │   │   ├── model_world_size_{self.world_size}_rank_{self.rank}.pt
     │   │   ├── optim_world_size_{self.world_size}_rank_{self.rank}.pt
     │   │   └── extra_state_world_size_{self.world_size}_rank_{self.rank}.pt
     │   ├── critic
     │   │   ├── huggingface
-    │   │   └── fsdp_config.json
     │   │   ├── model_world_size_{self.world_size}_rank_{self.rank}.pt
     │   │   ├── optim_world_size_{self.world_size}_rank_{self.rank}.pt
     │   │   └── extra_state_world_size_{self.world_size}_rank_{self.rank}.pt
@@ -63,15 +57,16 @@ Convert FSDP and Megatron Checkpoints to HuggingFace Format Model
 -----------------------------------------------------------------
 
 We provide a tool to convert the FSDP and Megatron checkpoints to HuggingFace format model.
-The tool is located in ``verl/model_merger``. For older versions of verl that don't include fsdp_config.json in checkpoints, you can use the legacy model merger located at ``verl/scripts/legacy_model_merger.py``.
+The tool is located in ``verl/model_merger``.
 
 The script supports two main sub-commands: `merge` (to convert and save checkpoints) and `test` (to validate merged checkpoints against a reference model).
 The arguments for the `merge` sub-command are as follows:
 
 .. code:: bash
 
-    usage: python -m verl.model_merger merge [-h] --backend {fsdp,megatron} [--local_dir LOCAL_DIR] [--tie-word-embedding] [--is-value-model] [--use_cpu_initialization] [--target_dir TARGET_DIR]
-                         [--hf_upload_path HF_UPLOAD_PATH] [--private]
+    usage: python -m verl.model_merger merge [-h] --backend {fsdp,megatron} --local_dir LOCAL_DIR [--hf_model_path HF_MODEL_PATH]
+                                [--tie-word-embedding] [--is-value-model] [--target_dir TARGET_DIR]
+                                [--hf_upload_path HF_UPLOAD_PATH] [--private]
 
     options:
     -h, --help            show this help message and exit
@@ -79,10 +74,10 @@ The arguments for the `merge` sub-command are as follows:
                             The backend of the model
     --local_dir LOCAL_DIR
                             Path to the saved model checkpoints
+    --hf_model_path HF_MODEL_PATH
+                            (Deprecated) Path to the original Hugging Face model for config.
     --tie-word-embedding  Whether to tie word embedding weights (currently only Megatron supported)
     --is-value-model      Whether the model is a value model (currently only Megatron supported)
-    --use_cpu_initialization
-                            Whether to use CPU initialization for the model. This is useful for large models that cannot fit into GPU memory during initialization.
     --target_dir TARGET_DIR
                             Directory to save the merged huggingface model
     --hf_upload_path HF_UPLOAD_PATH
@@ -94,16 +89,6 @@ Example usage for merging Megatron checkpoints:
 .. code:: bash
 
     python -m verl.model_merger merge \
-        --backend megatron \
-        --tie-word-embedding \
-        --local_dir checkpoints/verl_megatron_gsm8k_examples/qwen2_5_0b5_megatron_saveload/global_step_1/actor \
-        --target_dir /path/to/merged_hf_model
-
-Example usage for distributed merging Megatron checkpoints:
-
-.. code:: bash
-
-    torchrun --nproc_per_node 1 --nnodes 8 --node_rank ${RANK} -m verl.model_merger merge \
         --backend megatron \
         --tie-word-embedding \
         --local_dir checkpoints/verl_megatron_gsm8k_examples/qwen2_5_0b5_megatron_saveload/global_step_1/actor \
@@ -137,36 +122,22 @@ Current implementation use solution 2.
 HuggingFace to Megatron DistCheckpoint details
 ----------------------------------------------
 
-Through ``mbridge``, we can directly save the mcore model to huggingface format during training.
-No need to convert the model to Megatron dist-checkpoint format.
+If your model is quite huge, we recommend you to use Megatron dist-checkpoint to load the model.
+Megatron dist-checkpoint supports loading with different kinds of model parallelism,
+and it is much faster than the original checkpoint loading.
 
-.. note::
+To convert original HuggingFace model to Megatron dist-checkpoint,
+you can use the ``scripts/converter_hf_to_mcore.py`` script. Large MoE models are temporarily supported with CPU initialization,
+which is a little slower. While we are working on a better solution to support large models.
 
-    Megatron provides multiple optimizer checkpoint formats controlled by:
+Example command to convert the model is as follows:
 
-    - ``dist_ckpt_optim_fully_reshardable``:
+.. code:: bash
 
-      - ``False`` (default, dp-reshardable):
-        The optimizer checkpoint supports resuming with different data parallel sizes.
-        This format is faster and has lower memory overhead during checkpoint saving.
-
-      - ``True`` (fully-reshardable):
-        The optimizer checkpoint supports resuming with arbitrary parallelism configurations.
-        However, this format is slower and introduces additional memory overhead.
-
-    - ``distrib_optim_fully_reshardable_mem_efficient``:
-
-      When using fully-reshardable format, enabling this option switches communication
-      from NCCL to Gloo to reduce CUDA memory usage, at the cost of performance.
-
-.. warning::
-
-    When ``dist_ckpt_optim_fully_reshardable=True``, saving optimizer checkpoints requires
-    gathering optimizer states on data parallel rank 0. Although the final checkpoint is
-    sharded, this introduces a temporary aggregation step during saving.
-
-    This may increase CPU memory usage and lead to OOM issues for large models.
-    We recommend using the default dp-reshardable format in most cases.
+    python scripts/converter_hf_to_mcore.py \
+        --hf_model_path Qwen/Qwen1.5-MoE-A2.7B-Chat \
+        --output_path /mnt/disk/Qwen/Qwen1.5-MoE-A2.7B-Chat \
+        --use_cpu_initialization    # Only work for MoE models
 
 
 Original Checkpoint Utils

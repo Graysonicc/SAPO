@@ -5,7 +5,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 
 MODEL_ID=${MODEL_ID:-Qwen/Qwen2.5-0.5B}
 MODEL_PATH=${MODEL_PATH:-${HOME}/models/${MODEL_ID}}
-#hf download "${MODEL_ID}" --local-dir "${MODEL_PATH}"
+huggingface-cli download "${MODEL_ID}" --local-dir "${MODEL_PATH}"
 
 TRAIN_FILES=${TRAIN_FILES:-$HOME/data/gsm8k/train.parquet}
 VAL_FILES=${VAL_FILES:-$HOME/data/gsm8k/test.parquet}
@@ -13,23 +13,21 @@ MAX_PROMPT_LEN=${MAX_PROMPT_LEN:-512}
 MAX_RESPONSE_LEN=${MAX_RESPONSE_LEN:-512}
 
 ENGINE=${ENGINE:-vllm}
-if [ "$ENGINE" = "vllm" ]; then
-    export VLLM_USE_V1=1
+ROLLOUT_MODE=${ROLLOUT_MODE:-sync}
+
+RETURN_RAW_CHAT="False"
+if [ "$ROLLOUT_MODE" = "async" ]; then
+    RETURN_RAW_CHAT="True"
 fi
-ROLLOUT_MODE="async"
 
-RETURN_RAW_CHAT="True"
-SKIP_TOKENIZER_INIT="True"
-
-GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.7}
-ACTOR_FSDP_PARAM_OFFLOAD=${ACTOR_FSDP_PARAM_OFFLOAD:-True}
-ACTOR_FSDP_OPTIMIZER_OFFLOAD=${ACTOR_FSDP_OPTIMIZER_OFFLOAD:-True}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8}
+ACTOR_FSDP_PARAM_OFFLOAD=${ACTOR_FSDP_PARAM_OFFLOAD:-False}
+ACTOR_FSDP_OPTIMIZER_OFFLOAD=${ACTOR_FSDP_OPTIMIZER_OFFLOAD:-False}
 REF_FSDP_PARAM_OFFLOAD=${REF_FSDP_PARAM_OFFLOAD:-True}
 RM_PAD=${RM_PAD:-True}
 FUSED_KERNELS=${FUSED_KERNELS:-False}
 FUSED_KERNEL_BACKEND=${FUSED_KERNEL_BACKEND:-torch} # or 'triton' for triton backend
 ADV_ESTIMATOR=${ADV_ESTIMATOR:-gae}
-LOSS_MODE=${LOSS_MODE:-vanilla}
 USE_KL=${USE_KL:-False}
 CUSTOM_REWARD_FN=${CUSTOM_REWARD_FN:-False}
 ENABLE_CHUNKED_PREFILL=${ENABLE_CHUNKED_PREFILL:-True} # For vLLM VLM placeholder issue: https://github.com/vllm-project/vllm/issues/15185
@@ -37,10 +35,8 @@ STRATEGY=${STRATEGY:-fsdp}
 # LoRA config
 LORA_RANK=${LORA_RANK:-0}
 LORA_ALPHA=${LORA_ALPHA:-${LORA_RANK}}
-LORA_TARGET=${LORA_TARGET:-"all-linear"}
-LORA_EXCLUDE=${LORA_EXCLUDE:-"DONT_EXCLUDE"}
 USE_SHM=${USE_SHM:-False}
-LOAD_FORMAT=${LOAD_FORMAT:-dummy}
+LOAD_FORMAT=${LOAD_FORMAT:-dummy_dtensor}
 LAYERED_SUMMON=${LAYERED_SUMMON:-False}
 # Validation
 VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-False}
@@ -64,9 +60,9 @@ fi
 train_traj_micro_bsz_per_gpu=2 # b
 n_resp_per_prompt=4 # g
 
-train_traj_micro_bsz=$((train_traj_micro_bsz_per_gpu * 1)) # b * n
+train_traj_micro_bsz=$((train_traj_micro_bsz_per_gpu * NUM_GPUS)) # b * n
 train_traj_mini_bsz=$((train_traj_micro_bsz * 2)) # 2 * b * n
-train_prompt_mini_bsz=$((train_traj_mini_bsz * 2)) # 2 * b * n / g
+train_prompt_mini_bsz=$((train_traj_mini_bsz * n_resp_per_prompt)) # 2 * b * n / g
 train_prompt_bsz=$((train_prompt_mini_bsz * 2)) # 4 * b * n / g
 
 reward_fn_name=null
@@ -99,8 +95,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.use_shm=${USE_SHM} \
     actor_rollout_ref.model.lora_rank=${LORA_RANK} \
     actor_rollout_ref.model.lora_alpha=${LORA_ALPHA} \
-    actor_rollout_ref.model.target_modules=${LORA_TARGET} \
-    actor_rollout_ref.model.exclude_modules=${LORA_EXCLUDE} \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding="${RM_PAD}" \
     actor_rollout_ref.model.use_fused_kernels=${FUSED_KERNELS} \
@@ -114,15 +108,12 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size="${SP_SIZE}" \
     actor_rollout_ref.actor.checkpoint.save_contents=${CHECKPOINT_CONTENTS} \
     actor_rollout_ref.actor.use_kl_loss="${USE_KL}" \
-    actor_rollout_ref.actor.policy_loss.loss_mode="${LOSS_MODE}" \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${train_traj_micro_bsz_per_gpu} \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
-    actor_rollout_ref.rollout.n=${n_resp_per_prompt} \
     actor_rollout_ref.rollout.name="${ENGINE}" \
     actor_rollout_ref.rollout.mode="${ROLLOUT_MODE}" \
     actor_rollout_ref.rollout.load_format=${LOAD_FORMAT} \
     actor_rollout_ref.rollout.layered_summon=${LAYERED_SUMMON} \
-    actor_rollout_ref.rollout.skip_tokenizer_init="${SKIP_TOKENIZER_INIT}" \
     actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
     actor_rollout_ref.rollout.enable_chunked_prefill="${ENABLE_CHUNKED_PREFILL}" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${train_traj_micro_bsz_per_gpu} \
@@ -132,15 +123,15 @@ python3 -m verl.trainer.main_ppo \
     critic.model.path="${MODEL_PATH}" \
     critic.model.enable_gradient_checkpointing=False \
     critic.ppo_micro_batch_size_per_gpu=${train_traj_micro_bsz_per_gpu} \
-    critic.fsdp.param_offload=True \
-    critic.fsdp.optimizer_offload=True \
-    reward.custom_reward_function.path="${reward_fn_file_path}"\
-    reward.custom_reward_function.name="${reward_fn_name}"\
+    critic.model.fsdp_config.param_offload=False \
+    critic.model.fsdp_config.optimizer_offload=False \
+    custom_reward_function.path="${reward_fn_file_path}"\
+    custom_reward_function.name="${reward_fn_name}"\
     algorithm.use_kl_in_reward="${USE_KL}" \
     algorithm.kl_penalty=kl \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
-    trainer.logger=console \
+    trainer.logger=['console'] \
     trainer.project_name='verl-test' \
     trainer.experiment_name="${exp_name}" \
     trainer.nnodes=1 \

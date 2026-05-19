@@ -1,8 +1,6 @@
 Sandbox Fusion Example
 ============================
 
-Last updated: 06/27/2025.
-
 Introduction
 ------------
 
@@ -49,6 +47,6 @@ To further reduce code verification time, enable parallel processing with:
 
 For a practical implementation, refer to the example script:  
 
-``examples/sglang_multiturn/run_qwen3_4b_dapo_multiturn_fsdp.sh``
+``examples/ppo_trainer/run_deepseek7b_llm_sandbox_fusion.sh``
 
 Once you’ve set your API endpoint in the script, you can start the training job.

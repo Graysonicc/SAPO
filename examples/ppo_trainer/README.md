@@ -31,7 +31,7 @@ Most critic configs are similar to those of actors. Note that the critic model i
 
 - `actor_rollout_ref.actor.ppo_mini_batch_size`: The set of sampled trajectories is split into multiple mini-batches with batch_size=ppo_mini_batch_size for PPO actor updates. The ppo_mini_batch_size is a global size across all workers
 
-- `critic.ppo_mini_batch_size`: The set of sampled trajectories is split into multiple mini-batches with batch_size=ppo_mini_batch_size for PPO critic updates. The ppo_mini_batch_size is a global size across all workers
+- `actor_rollout_ref.critic.ppo_mini_batch_size`: The set of sampled trajectories is split into multiple mini-batches with batch_size=ppo_mini_batch_size for PPO critic updates. The ppo_mini_batch_size is a global size across all workers
 
 - `actor_rollout_ref.actor.clip_ratio`: The PPO clip range. Default to 0.2
 
@@ -39,11 +39,11 @@ Most critic configs are similar to those of actors. Note that the critic model i
 
 - `critic.ppo_epochs`: Number of epochs for PPO updates on one set of sampled trajectories for critic. Defaults to `actor_rollout_ref.actor.ppo_epochs`
 
-- `algorithm.gamma`: discount factor
+- `algorithm.gemma`: discount factor
 
 - `algorithm.lam`: The lambda term that trades off between bias and variance in the GAE estimator
 
-- `algorithm.adv_estimator`: Support gae, grpo, reinforce_plus_plus, reinforce_plus_plus_baseline, rloo, rloo_vectorized
+- `algorithm.adv_estimator`: Support gae, grpo, reinforce_plus_plus, reinforce_plus_plus_baseline, rloo
 
 ## Advanced Extensions
 
@@ -57,7 +57,7 @@ Options to use KL loss for KL divergence control:
 
 - `actor_rollout_ref.actor.kl_loss_coef`: The coefficient of kl loss. Default is 0.001.
 
-- `actor_rollout_ref.actor.kl_loss_type`: Support kl(k1), abs, mse(k2), low_var_kl(k3) and full. Appending "+" in the end (e.g., 'k1+' and 'k3+') would apply straight through to employ k2 for unbiased gradient estimation, regardless of the kl value estimation (see https://github.com/verl-project/verl/pull/2953#issuecomment-3162113848 for more details). How to calculate the kl divergence between actor and reference policy. See this blog post for detailed analysis: http://joschu.net/blog/kl-approx.html
+- `actor_rollout_ref.actor.kl_loss_type`: Support kl(k1), abs, mse(k2), low_var_kl(k3) and full. How to calculate the kl divergence between actor and reference policy. See this blog post for detailed analysis: http://joschu.net/blog/kl-approx.html
 
 Options to use KL penalty in the reward:
 
@@ -78,18 +78,22 @@ The Dual-Clip PPO introduces a approach by applying a lower bound to the policy 
 
 - `actor_rollout_ref.actor.clip_ratio_c`: lower bound of the value for Dual-clip PPO, defaults to 3.0
 
-## Canonical Scripts
+## Reference Example
 
-All scripts follow the `run_<model>_<infer-backend>_<train-backend>[_<platform>].sh` naming convention, use `MODEL_PATH` as an env var (override like `MODEL_PATH=Qwen/Qwen3-14B bash run_qwen3_8b_fsdp.sh`), enable dynamic batch size and batch balancing by default, and only use current-API Hydra overrides.
+Qwen2.5 training log and commands: [link](https://github.com/eric-haibin-lin/verl-data/blob/experiments/gsm8k/Qwen2.5-0.5B-bsz256_2-prompt1024-resp512-0.567.log)
 
-| Script                                  | Infer  | Train    | Platform |
-|-----------------------------------------|--------|----------|----------|
-| `run_qwen3_8b_fsdp.sh`             | vLLM   | FSDP     | NVIDIA   |
-| `run_qwen3_8b_fsdp.sh`           | SGLang | FSDP     | NVIDIA   |
-| `run_qwen3_8b_megatron.sh`         | vLLM   | Megatron | NVIDIA   |
-| `run_qwen3_8b_fsdp.sh`         | vLLM   | FSDP     | Ascend   |
-
-Default dataset: GSM8K + MATH. Override `TRAIN_BATCH_SIZE`, `PPO_MINI_BATCH_SIZE`, `ACTOR_LR`, `CRITIC_LR`, `ROLLOUT_TP`, `NNODES`, `NGPUS_PER_NODE`, etc. via env vars listed at the top of each script.
+```bash
+bash run_gemma.sh
+  trainer.n_gpus_per_node=1 \
+  actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+  trainer.logger=['console'] \
+  critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+  actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+  data.train_batch_size=256 \
+  actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+  actor_rollout_ref.actor.ppo_micro_batch_size=2 \
+  critic.ppo_micro_batch_size=2
+```
 
 Reference performance with verl v0.2:
 

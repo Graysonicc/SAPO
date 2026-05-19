@@ -13,8 +13,7 @@
 # limitations under the License.
 """Custom type annotation check tool.
 To inspect the type annotation for functions in the entire codebase, please run:
-find verl -type f -name "*.py" | xargs -n 1 python3 tests/special_sanity/type_coverage_check.py --all-lines
---debug --target-file
+find verl -type f -name "*.py" | xargs -n 1 python3 tests/special_sanity/type_coverage_check.py --all-lines --debug --target-file
 """
 
 import argparse
@@ -22,22 +21,21 @@ import ast
 import linecache
 import subprocess
 from pathlib import Path
+from typing import List, Set, Tuple
 
 
-def get_changed_files() -> list[Path]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=AM", "origin/main...HEAD"], stdout=subprocess.PIPE, text=True
-    )
+def get_changed_files() -> List[Path]:
+    result = subprocess.run(["git", "diff", "--name-only", "--diff-filter=AM", "origin/main...HEAD"], stdout=subprocess.PIPE, text=True)
     return [Path(f) for f in result.stdout.splitlines() if f.endswith(".py")]
 
 
-def get_changed_lines(file_path: Path) -> set[int]:
+def get_changed_lines(file_path: Path) -> Set[int]:
     result = subprocess.run(
         ["git", "diff", "-U0", "origin/main...HEAD", "--", str(file_path)],
         stdout=subprocess.PIPE,
         text=True,
     )
-    lines: set[int] = set()
+    lines: Set[int] = set()
     for line in result.stdout.splitlines():
         if line.startswith("@@"):
             for part in line.split():
@@ -69,12 +67,7 @@ def should_check_type(arg_name: str) -> bool:
 def has_type_annotations(node: ast.AST, debug: bool = False) -> int:
     if isinstance(node, ast.FunctionDef):
         is_private = node.name.startswith("_")
-        if node.args.vararg is not None or node.args.kwarg is not None:
-            return CHECK_SUCCESS
-        has_ann = (
-            all(arg.annotation is not None for arg in node.args.args if should_check_type(arg.arg))
-            and node.returns is not None
-        )
+        has_ann = all(arg.annotation is not None for arg in node.args.args if should_check_type(arg.arg)) and node.returns is not None
         if has_ann or is_private:
             return CHECK_SUCCESS
         else:
@@ -84,28 +77,24 @@ def has_type_annotations(node: ast.AST, debug: bool = False) -> int:
     return CHECK_SUCCESS
 
 
-def check_file(
-    file_path: Path, changed_lines: set[int], debug: bool = False
-) -> tuple[int, int, list[tuple[Path, int, str]], list[tuple[Path, int, str]]]:
+def check_file(file_path: Path, changed_lines: Set[int], debug: bool = False) -> Tuple[int, int, List[Tuple[Path, int, str]], List[Tuple[Path, int, str]]]:
     with open(file_path) as f:
         source: str = f.read()
     tree = ast.parse(source, filename=str(file_path))
     annotated = 0
     total = 0
-    warning_lines: list[tuple[Path, int, str]] = []
-    failure_lines: list[tuple[Path, int, str]] = []
+    warning_lines: List[Tuple[Path, int, str]] = []
+    failure_lines: List[Tuple[Path, int, str]] = []
 
     for node in ast.walk(tree):
         if hasattr(node, "lineno") and node.lineno in changed_lines:
-            if isinstance(node, ast.FunctionDef | ast.Assign | ast.AnnAssign):
+            if isinstance(node, (ast.FunctionDef, ast.Assign, ast.AnnAssign)):
                 total += 1
                 result = has_type_annotations(node, debug)
                 if result == CHECK_SUCCESS or result == CHECK_WARNING:
                     annotated += 1
                     if result == CHECK_WARNING:
-                        warning_lines.append(
-                            (file_path, node.lineno, linecache.getline(str(file_path), node.lineno).strip())
-                        )
+                        warning_lines.append((file_path, node.lineno, linecache.getline(str(file_path), node.lineno).strip()))
                 else:
                     source_line = linecache.getline(str(file_path), node.lineno).strip()
                     failure_lines.append((file_path, node.lineno, source_line))
@@ -115,9 +104,7 @@ def check_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--threshold", type=float, default=0.3, help="Minimum ratio of annotated lines required (0.0 - 1.0)"
-    )
+    parser.add_argument("--threshold", type=float, default=0.3, help="Minimum ratio of annotated lines required (0.0 - 1.0)")
     parser.add_argument("--target-file", type=str, default=None, help="Path to the Python source file to analyse")
     parser.add_argument(
         "--all-lines",
@@ -129,8 +116,8 @@ def main() -> None:
 
     total_changed = 0
     total_annotated = 0
-    all_warnings: list[tuple[Path, int, str]] = []
-    all_failures: list[tuple[Path, int, str]] = []
+    all_warnings: List[Tuple[Path, int, str]] = []
+    all_failures: List[Tuple[Path, int, str]] = []
 
     target_files = [args.target_file] if args.target_file is not None else get_changed_files()
     for fpath in target_files:
@@ -148,10 +135,7 @@ def main() -> None:
 
     ratio = (total_annotated / total_changed) if total_changed else 1.0
 
-    print(
-        f"🔍 Type coverage on {'all' if args.all_lines else 'changed'} lines: "
-        f"{total_annotated}/{total_changed} = {ratio:.2%}. Files inspected: {target_files}"
-    )
+    print(f"🔍 Type coverage on {'all' if args.all_lines else 'changed'} lines: {total_annotated}/{total_changed} = {ratio:.2%}. Files inspected: {target_files}")
 
     if all_warnings:
         print("\n⚠️ Suggest Improve: Lines missing type annotations for inputs and outputs:\n")
@@ -164,10 +148,7 @@ def main() -> None:
             print(f"{fname}:{lineno}: {line}")
 
     if ratio < args.threshold:
-        print(
-            f"Please add type annotations for inputs and outputs to meet threshold {args.threshold}. "
-            f"Cases exempt from checking:"
-        )
+        print(f"Please add type annotations for inputs and outputs to meet threshold {args.threshold}. Cases exempt from checking:")
         print("1. Private methods.")
         print("2. Args with name in ('self', 'cls'), or *args / **kwargs")
         print("3. Files under tests/")

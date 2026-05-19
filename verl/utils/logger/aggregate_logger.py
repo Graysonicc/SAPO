@@ -18,16 +18,16 @@ A Ray logger will receive logging info from different processes.
 import datetime
 import logging
 import numbers
-import pprint
+from typing import Dict
 
 import torch
 
 
-def concat_dict_to_str(dict: dict, step):
+def concat_dict_to_str(dict: Dict, step):
     output = [f"step:{step}"]
     for k, v in dict.items():
         if isinstance(v, numbers.Number):
-            output.append(f"{k}:{pprint.pformat(v)}")
+            output.append(f"{k}:{v:.3f}")
     output_str = " - ".join(output)
     return output_str
 
@@ -63,9 +63,7 @@ class DecoratorLoggerBase:
         log_only_rank_0 (bool): If True, only log for rank 0.
     """
 
-    def __init__(
-        self, role: str, logger: logging.Logger = None, level=logging.DEBUG, rank: int = 0, log_only_rank_0: bool = True
-    ):
+    def __init__(self, role: str, logger: logging.Logger = None, level=logging.DEBUG, rank: int = 0, log_only_rank_0: bool = True):
         self.role = role
         self.logger = logger
         self.level = level
