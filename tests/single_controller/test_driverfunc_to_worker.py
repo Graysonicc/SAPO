@@ -22,6 +22,7 @@ from verl import DataProto
 from verl.single_controller.base.worker import Worker
 from verl.single_controller.ray import RayWorkerGroup
 from verl.single_controller.ray.base import RayClassWithInitArgs, RayResourcePool
+from verl.utils.device import get_device_name
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["NCCL_DEBUG"] = "WARN"
@@ -43,7 +44,11 @@ def get_aux_metrics(self, test_proto):
     decode_count = []
     for i in range(sequence_ids.size(0)):
         decode_count.append(len(sequence_ids[i].tolist()))
-    ret_proto = DataProto(batch=TensorDict({"sequence_ids": sequence_ids, "decode_count": torch.tensor(decode_count)}, batch_size=sequence_ids.size(0)))
+    ret_proto = DataProto(
+        batch=TensorDict(
+            {"sequence_ids": sequence_ids, "decode_count": torch.tensor(decode_count)}, batch_size=sequence_ids.size(0)
+        )
+    )
     return ret_proto
 
 
@@ -55,7 +60,7 @@ def test():
     resource_pool = RayResourcePool([2], use_gpu=True, name_prefix="a")
 
     class_with_args = RayClassWithInitArgs(cls=ModelActor)
-    shard_wg = RayWorkerGroup(resource_pool, class_with_args)
+    shard_wg = RayWorkerGroup(resource_pool, class_with_args, device_name=get_device_name())
 
     test_bs = 8
     test_proto = DataProto(

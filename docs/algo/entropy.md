@@ -1,5 +1,6 @@
 # Recipe: Entropy Mechanism
 
+Last updated: 06/27/2025.
 
 
 <div align="center">
@@ -66,7 +67,7 @@ This paper addresses the entropy collapse issue in scaling reinforcement learnin
 
 Theoretically, we find entropy changes are driven by the covariance between action probability and logit updates, which correlates with advantage in Policy Gradient methods. High-probability, high-advantage actions reduce entropy, while rare, high-advantage actions increase it. Empirically, the covariance term remains positive, explaining entropy’s monotonic decline. To mitigate this, we propose ​​Clip-Cov​​ and ​​KL-Cov​​, which restrict updates for high-covariance tokens. These methods effectively prevent entropy collapse, and improve performance. 
 
-# 📃Evaluation
+## 📃Evaluation
 
 <div align="left">
   <img src="https://github.com/PRIME-RL/Entropy-Mechanism-of-RL/blob/main/figures/performance_fig.jpg?raw=true" alt="issue" style="width: 96%; height: auto;">
@@ -102,7 +103,7 @@ If you find this paper or repo helpful, please cite us.
 }
 ```
 ## 🌻Acknowledgement
-We implement our reinforcement learning algorithm extending from [verl](https://github.com/volcengine/verl). We utilize [vLLM](https://github.com/vllm-project/vllm) for inference. Our models are trained primarily on [Qwen2.5 family](https://github.com/QwenLM/Qwen2.5). Our training data is built from [DAPO-MATH](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k). Thanks for their great contributions!
+We implement our reinforcement learning algorithm extending from [verl](https://github.com/verl-project/verl). We utilize [vLLM](https://github.com/vllm-project/vllm) for inference. Our models are trained primarily on [Qwen2.5 family](https://github.com/QwenLM/Qwen2.5). Our training data is built from [DAPO-MATH](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k). Thanks for their great contributions!
 
 ## 📬 Contact
 

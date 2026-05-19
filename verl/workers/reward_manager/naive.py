@@ -13,16 +13,18 @@
 # limitations under the License.
 
 from collections import defaultdict
+from typing import Any
 
 import torch
 
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
 from verl.workers.reward_manager import register
+from verl.workers.reward_manager.abstract import AbstractRewardManager
 
 
 @register("naive")
-class NaiveRewardManager:
+class NaiveRewardManager(AbstractRewardManager):
     """The reward manager."""
 
     def __init__(self, tokenizer, num_examine, compute_score=None, reward_fn_key="data_source") -> None:
@@ -33,22 +35,21 @@ class NaiveRewardManager:
             tokenizer: The tokenizer used to decode token IDs into text.
             num_examine: The number of batches of decoded responses to print to the console for debugging purpose.
             compute_score: A function to compute the reward score. If None, `default_compute_score` will be used.
-            reward_fn_key: The key used to access the data source in the non-tensor batch data. Defaults to "data_source".
+            reward_fn_key: The key used to access the data source in the non-tensor batch data. Defaults to
+                "data_source".
         """
         self.tokenizer = tokenizer  # Store the tokenizer for decoding token IDs
         self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
         self.compute_score = compute_score or default_compute_score
         self.reward_fn_key = reward_fn_key  # Store the key for accessing the data source
 
-    def __call__(self, data: DataProto, return_dict=False):
+    def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
         """We will expand this function gradually based on the available datasets"""
 
         # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
-        if "rm_scores" in data.batch.keys():
-            if return_dict:
-                return {"reward_tensor": data.batch["rm_scores"]}
-            else:
-                return data.batch["rm_scores"]
+        reward_from_rm_scores = self._extract_reward_from_rm_scores(data, return_dict)
+        if reward_from_rm_scores is not None:
+            return reward_from_rm_scores
 
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_extra_info = defaultdict(list)
@@ -75,7 +76,11 @@ class NaiveRewardManager:
 
             ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
             data_source = data_item.non_tensor_batch[self.reward_fn_key]
-            extra_info = data_item.non_tensor_batch.get("extra_info", None)
+            extra_info = data_item.non_tensor_batch.get("extra_info", {})
+            num_turns = data_item.non_tensor_batch.get("__num_turns__", None)
+            rollout_reward_scores = data_item.non_tensor_batch.get("reward_scores", {})
+            extra_info["num_turns"] = num_turns
+            extra_info["rollout_reward_scores"] = rollout_reward_scores
 
             score = self.compute_score(
                 data_source=data_source,
@@ -91,18 +96,6 @@ class NaiveRewardManager:
                     reward_extra_info[key].append(value)
             else:
                 reward = score
-
-            # ===== length penalty =====
-            L = int(valid_response_length)
-            max_resp_len = response_ids.shape[-1]
-            L0 = int(max_resp_len * 0.9)
-            lam_len = 0.001
-            lam_max = 0.3
-            length_penalty = lam_len * max(0, L - L0)
-            if L >= max_resp_len - 1:
-                length_penalty += lam_max
-            length_penalty = min(length_penalty, 0.5)
-            reward = reward - length_penalty
 
             reward_tensor[i, valid_response_length - 1] = reward
 

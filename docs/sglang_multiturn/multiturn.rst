@@ -1,6 +1,8 @@
 Multi-turn Rollout Support
 ==========================
 
+Last updated: 06/27/2025.
+
 Basic Configuration
 ~~~~~~~~~~~~~~~~~~~
 
@@ -24,7 +26,8 @@ For custom environment interaction tools, you can implement your own tools based
 
     tools:
       - class_name: ""
-        config: {}
+        config: 
+            type: native
         tool_schema:
 
 You may refer to GSM8KTool_example_configuration_, which is one example of the tool configurations. Its implementation can be found in gsm8k_tool.py_.
@@ -38,20 +41,151 @@ Finally, set the ``tools_config_file`` in your rollout config:
             tool_kwargs:
                 tools_config_file: <path_to_tool_yaml_file>
 
-This allows integration of customized tool behaviors during actor rollout steps. 
+This allows integration of customized tool behaviors during actor rollout steps.
 
-If you want rollout with simulated interaction, you can set the ``interaction_config_file`` in your rollout config:
+If your tool creates multi-modal inputs, you should return a list of multi-modal inputs in your tool.execute() implementation.
+
+Image and video should be processed before returning. For example, if you are using Qwen2.5-VL, you can use the following code to get the representations:
+
+.. code-block:: python
+
+    async def create(self, ...) -> tuple[str, ToolResponse]:
+        ...
+        from verl.utils.dataset.vision_utils import process_image, process_video
+
+        img1 = process_image(img1)
+        video1 = process_video(video1)
+
+        # due to the (image | video) key is ("image" | "video") instead of ("images" | "videos") in vllm, we need to use ("image" | "video") to specify list of images/videos
+        # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
+        return instance_id, ToolResponse(image=[img1, ...], video=[video1, ...], text="...")
+
+    async def execute(self, ...) -> Tuple[str | Dict[str, Any], float, dict]:
+        ...
+        from verl.utils.dataset.vision_utils import process_image, process_video
+
+        img1 = process_image(img1)
+        video1 = process_video(video1)
+
+        # due to the (image | video) key is ("image" | "video") instead of ("images" | "videos") in vllm, we need to use ("image" | "video") to specify list of images/videos
+        # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
+        return ToolResponse(image=[img1, ...], video=[video1, ...], text="..."), 0, {}
+
+remeber to set ``return_multi_modal_inputs: False`` in your dataset config in order to process the multi-modal inputs in the rollout correctly.
+Refer to the `Handling Multi-Modal Inputs in Datasets`_ section for more details.
+
+MCP Tool Configuration
+~~~~~~~~~~~~~~~~~~~~~~
+
+For MCP interaction tools, you can flexibly configure them using a YAML file. The typical setup is as follows:
+
 .. code-block:: yaml
 
-    interaction:
+    tools:
       - class_name: ""
-        config: {}
+        config:
+            type: mcp
+        mcp:
+            mcp_servers_config_path: ./mcp_server.json
+            tool_selected_list: {}
+
+The ``tool_selected_list`` field is optional and specifies which tools to use from the servers. If you want to enable all available tools, simply omit this attribute. Besides, ``mcp_servers_config_path`` points to a JSON file containing the MCP server configurations. For example:
+
+.. code-block:: json
+
+      {
+          "mcpServers": {
+              "SSE Server": {
+                  "url": "your_server_url",
+                  "auth_token": "your_server_api_token"
+              },
+              "STDIO Server": {
+                  "command": "npx",
+                  "args": ["-y", "server-mcp@0.2.1"],
+                  "env": {
+                    "SERVER_API_KEY": "your_server_api_token"
+                  }
+              }
+          }
+      }
+
+Since the content formats returned by the MCP server may vary, users can inherit from ``MCPBaseTool`` and override the ``_parse_tool_result`` method to implement custom parsing logic.
+
+.. code-block:: python
+
+   class MCPYourTool(MCPBaseTool):
+       def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
+           super().__init__(config, tool_schema)
+
+       def _parse_tool_result(self, content: list) -> Tuple[str, dict]:
+           ...
+
+Overall, you may refer to mcp_search_tool.py_ and mcp_tool_config.yaml_ for custom implementation and configuration.
+
+Function Tool Configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For stateless tools, defining a full ``BaseTool`` subclass plus a yaml schema is overkill. The ``@function_tool`` decorator lets you register a plain Python function as a tool; verl delegates schema inference to :func:`transformers.utils.get_json_schema`, which reads the function signature and a Google-style docstring.
+
+A typical configuration:
 
 .. code-block:: yaml
 
     actor_rollout_ref:
         rollout:
-            interaction_config_file: <path_to_interaction_yaml_file>
+            mode: async
+            multi_turn:
+                enable: True
+                format: hermes  # or any other format your model's chat template supports
+                function_tool_path: path/to/your_tools.py
+            agent:
+                default_agent_loop: tool_agent
+
+Define your tools in ``path/to/your_tools.py``. The decorator works either bare or with an explicit name; the function name is used as the tool name when bare:
+
+.. code-block:: python
+
+    from verl.tools.utils.function_tool import function_tool
+
+    @function_tool
+    def get_weather(city: str) -> dict:
+        """Get the current weather for a city.
+
+        Args:
+            city: The city to look up, e.g. "Tokyo" or "San Francisco".
+        """
+        return {"temperature_c": 17.3, "condition": "drizzle"}
+
+    @function_tool("calculator")  # explicit name overrides the function name
+    def calculator(expression: str) -> str:
+        """Evaluate a Python-style arithmetic expression.
+
+        Args:
+            expression: A Python-style arithmetic expression, e.g. "(3+4)*5".
+        """
+        return str(eval(expression, {"__builtins__": {}}, {}))
+
+A few notes on the inferred schema:
+
+- Parameter types come from the function's type annotations. Beyond the primitives (``str``, ``int``, ``float``, ``bool``), generic and union forms work too: ``list[T]`` / ``dict[K, V]``, ``Optional[X]`` / ``X | None`` (yields ``nullable``), ``int | float`` (yields the JSON ``["integer", "number"]`` type), ``Literal["a", "b"]`` (yields ``enum``).
+- Per-argument descriptions come from the ``Args:`` section of the docstring.
+- Parameters without a default value are marked ``required``.
+- The function may be sync or async; sync functions are dispatched through ``asyncio.to_thread`` so they don't block the event loop.
+- ``*args`` / ``**kwargs`` are not representable in JSON Schema and will be rejected at registration time. Use a ``param: list[T]`` argument instead for variable-length inputs.
+- Pass ``schema=`` to the decorator if you want to bypass inference entirely and supply your own ``OpenAIFunctionToolSchema`` (or a dict with the same shape).
+
+If the function violates ``transformers.get_json_schema``'s contract -- no docstring, missing type hint on a parameter, or a parameter that isn't documented in ``Args:`` -- registration raises a ``DocstringParsingException`` or ``TypeHintParsingException`` that points at the offending function. Fix the function rather than catching the exception.
+
+Return values are normalised the same way for every function tool:
+
+- ``str`` → wrapped as ``ToolResponse(text=...)``
+- ``dict`` → JSON-serialised into ``ToolResponse(text=...)``
+- ``ToolResponse`` → passed through unchanged
+- ``(response, reward)`` or ``(response, reward, metrics)`` tuples are accepted, with ``None`` reward / metrics treated as ``0.0`` / ``{}``
+
+``function_tool_path`` and ``tool_config_path`` (BaseTool / MCP) can be set together. The bundled ``tool_agent`` merges both into one registry and rejects any name shared between a function tool and a yaml-declared tool with an assertion that names the offenders, so a stray ``@function_tool("search")`` cannot silently shadow a production tool. Custom agent loops that consume both lists are responsible for their own collision policy.
+
+The function-tool path intentionally exposes no framework-level lifecycle hooks: each call is just ``fn(**parameters)``, with no ``create``/``release`` or per-trajectory ``instance_id``. For *per-trajectory* state that must be torn down between rollouts (sandbox VMs, scratch directories, DB rows) or that needs ``tools_kwargs`` injected from the dataset, keep using ``BaseTool`` via ``tool_config_path``.
 
 Multi-turn Tokenization
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -100,7 +234,7 @@ The tokenization sanity check mode can be configured using the ``actor_rollout_r
 
 - ``ignore_strippable``: Ignores differences in whitespace characters (``\n``, ``\t``, ``\r``, spaces) while still checking for meaningful text mismatches. This is useful when debugging chat template issues where whitespace variations are expected and acceptable.
 
-- ``off``: Completely disables the tokenization sanity check. Only use this if you have thoroughly validated that tokenization discrepancies are expected and won't impact training.
+- ``disable``: Completely disables the tokenization sanity check. Only use this if you have thoroughly validated that tokenization discrepancies are expected and won't impact training.
 
 Example configuration:
 
@@ -109,7 +243,17 @@ Example configuration:
     actor_rollout_ref:
         rollout:
             multi_turn:
-                tokenization_sanity_check_mode: "ignore_strippable"  # Choose from: "strict", "ignore_strippable", "off"
+                tokenization_sanity_check_mode: "ignore_strippable"  # Choose from: "disable", "ignore_strippable", "strict"
+
+Handling Multi-Modal Inputs in Datasets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If your dataset includes multi-modal inputs (such as images or videos), you can control whether these are pre-processed and included in each sample by setting the return_multi_modal_inputs flag in your dataset config (used by RLHFDataset).
+
+- ``return_multi_modal_inputs: True`` (default): The dataset will pre-process and include a multi_modal_inputs dictionary for each sample. This dict contains the model-ready representations (e.g., image tensors, video tensors, etc.) as produced by your processor. This is useful for single-turn or SFT-style training, where the model expects all modalities to be present in the batch.
+
+- ``return_multi_modal_inputs: False``: The dataset will not include the multi_modal_inputs field. This is recommended for multi-turn RL or tool-augmented rollouts, where the model may generate new multi-modal inputs dynamically during rollout, and you want to avoid conflicts or redundant data in the batch.
+
 
 Special Cases
 ^^^^^^^^^^^^^
@@ -203,7 +347,7 @@ This method works well for Qwen3 series. However, Qwen/QwQ-32B currently has a b
 .. code-block:: bash
 
     pip install huggingface_hub
-    huggingface-cli download Qwen/QwQ-32B --revision refs/pr/81
+    hf download Qwen/QwQ-32B --revision refs/pr/81
 
 .. _fix: https://huggingface.co/Qwen/QwQ-32B/discussions/81
 
@@ -230,19 +374,15 @@ See the training performance of multi-turn rollout on the GSM8K task HERE_.
 
 .. _HERE: https://wandb.ai/zhaochenyang20/gsm8k_async_rl/runs/1ro1r7om?nw=nwuserzhaochenyang20
 
-.. _GSM8KTool_example_configuration: https://github.com/volcengine/verl/blob/main/examples/sglang_multiturn/config/tool_config/gsm8k_tool_config.yaml
+.. _GSM8KTool_example_configuration: https://github.com/verl-project/verl/blob/main/examples/sglang_multiturn/config/tool_config/gsm8k_tool_config.yaml
 
-.. _gsm8k_tool.py: https://github.com/volcengine/verl/blob/main/verl/tools/gsm8k_tool.py
+.. _gsm8k_tool.py: https://github.com/verl-project/verl/blob/main/verl/tools/gsm8k_tool.py
 
-Interaction System
-~~~~~~~~~~~~~~~~~~
+.. _mcp_search_tool.py: https://github.com/verl-project/verl/blob/main/verl/tools/mcp_search_tool.py
 
-For dynamic conversational feedback during RL training, see:
+.. _mcp_tool_config.yaml: https://github.com/verl-project/verl/blob/main/examples/sglang_multiturn/config/tool_config/mcp_tool_config.yaml
 
-.. toctree::
-   :maxdepth: 1
-
-   interaction_system
+.. _function_tool_examples: https://github.com/verl-project/verl/blob/main/tests/experimental/agent_loop/function_tool_examples.py
 
 Search Tool Integration
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -251,3 +391,7 @@ Search Tool Integration
    :maxdepth: 1
 
    search_tool_example
+
+Code Walkthrough
+~~~~~~~~~~~~~~~~~~~~~~~
+If you want to learn more in depth about the code execution flow, please read https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/tree/main/rlhf/verl/multi-turn/code-walk-through

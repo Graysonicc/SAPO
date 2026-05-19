@@ -12,24 +12,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
+try:
+    from flash_attn.ops.triton.cross_entropy import cross_entropy_loss
 
-def _fused_linear_for_ppo_fwd(hidden_states: torch.FloatTensor, vocab_weights: torch.FloatTensor, input_ids: torch.LongTensor, temperature: float = 1.0) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    _FLASH_ATTN_CROSS_ENTROPY_AVAILABLE = True
+except ImportError:
+    _FLASH_ATTN_CROSS_ENTROPY_AVAILABLE = False
+
+
+def _fused_linear_for_ppo_fwd(
+    hidden_states: torch.FloatTensor,
+    vocab_weights: torch.FloatTensor,
+    input_ids: torch.LongTensor,
+    temperature: float = 1.0,
+) -> tuple[torch.FloatTensor, torch.FloatTensor]:
     logits = (hidden_states @ vocab_weights.t()) / temperature
     orig_dtype = logits.dtype
     logits = logits.to(torch.float32)
 
-    # Slower but more numerically stable to do log_softmax than probs.log()
     probs = logits.softmax(dim=-1)
-    log_probs = logits.log_softmax(dim=-1)
-
-    token_log_probs = log_probs.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)
     entropy = torch.logsumexp(logits, dim=-1) - torch.sum(probs * logits, dim=-1)
 
-    return token_log_probs.to(orig_dtype), entropy.to(orig_dtype)
+    if _FLASH_ATTN_CROSS_ENTROPY_AVAILABLE:
+        per_token_entropy_loss = cross_entropy_loss(logits, input_ids)[0]
+        token_log_probs = -per_token_entropy_loss
+    else:
+        # Fallback to original PyTorch implementation
+        log_probs = logits.log_softmax(dim=-1)
+        token_log_probs = log_probs.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)
+
+    assert token_log_probs.dtype == torch.float32
+    return token_log_probs, entropy.to(orig_dtype)
 
 
 def _fused_linear_for_ppo_bwd(
@@ -39,7 +56,7 @@ def _fused_linear_for_ppo_bwd(
     vocab_weights: torch.FloatTensor,
     input_ids: torch.LongTensor,
     temperature: float = 1.0,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor]:
     logits = (hidden_states @ vocab_weights.t()) / temperature
     orig_dtype = logits.dtype
     logits = logits.to(torch.float32)
@@ -76,7 +93,7 @@ class FusedLinearForPPOFunction(torch.autograd.Function):
         input_ids: torch.LongTensor,
         temperature: float = 1.0,
         chunk_size: int = 512,
-    ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
         ctx.set_materialize_grads(False)
 
         # Cast to a 2D tensor of the shape [T, D] for ease of working
@@ -94,7 +111,8 @@ class FusedLinearForPPOFunction(torch.autograd.Function):
 
         # Allocate memory for outputs
         output_requires_grad = hidden_states.requires_grad or vocab_weights.requires_grad
-        log_probs = hidden_states.new_zeros(T, requires_grad=output_requires_grad)
+        # Logits are upcasted to fp32 before computing log_probs, which are also fp32
+        log_probs = torch.zeros(T, device=hidden_states.device, dtype=torch.float32, requires_grad=output_requires_grad)
         entropy = hidden_states.new_zeros(T, requires_grad=output_requires_grad)
 
         # Perform forward one chunk at a time
@@ -200,7 +218,7 @@ class FusedLinearForPPO(torch.nn.Module):
         vocab_weights: torch.FloatTensor,
         input_ids: torch.LongTensor,
         temperature: float = 1.0,
-    ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
         input_ids = input_ids.to(torch.int64)
         return FusedLinearForPPOFunction.apply(
             hidden_states,

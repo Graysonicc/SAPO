@@ -1,6 +1,8 @@
 PPO Ray Trainer
 ===============
 
+Last updated: 02/12/2025.
+
 We implement the RayPPOTrainer, which is a trainer runs on the driver
 process on a single CPU/GPU node (default is CPU).
 
@@ -98,7 +100,7 @@ PPO Training Loop
 
 We implement the PPO training loop by calling the functions in
 worker_group of each role. The input and output data of each function is
-a ``DataProto`` object implemented in `protocol.py <https://github.com/volcengine/verl/blob/main/verl/protocol.py>`_. In the training
+a ``DataProto`` object implemented in `protocol.py <https://github.com/verl-project/verl/blob/main/verl/protocol.py>`_. In the training
 loop, trainer will dispatch/collect the data to/from different GPUs
 following the transfer protocols wrapped in the workers' functions. The
 computation of PPO micro batches is processed in ``update_actor`` and
