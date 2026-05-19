@@ -96,6 +96,7 @@ import contextlib
 import math
 import re
 from math import isclose
+from typing import Union
 
 # sympy related
 from sympy import N, simplify
@@ -124,9 +125,7 @@ def normalize(answer, pi) -> str:
         return answer[1:]
 
     # checking if answer is <number>% or <number>\\% and removing %
-    if isinstance(answer, str) and (
-        bool(re.match(r"^\d+(\.\d+)?%$", answer)) or bool(re.match(r"^\d+(\.\d+)?\\%$", answer))
-    ):
+    if isinstance(answer, str) and (bool(re.match(r"^\d+(\.\d+)?%$", answer)) or bool(re.match(r"^\d+(\.\d+)?\\%$", answer))):
         return answer.replace("\\%", "").replace("%", "")
 
     # handle base
@@ -148,9 +147,9 @@ def handle_base(x) -> str:
 
 
 def handle_pi(string, pi):
-    if isinstance(string, str) and "\\pi" in string:
+    if isinstance(string, str) and "\pi" in string:
         # Find the first occurrence of "\pi"
-        idx = string.find("\\pi")
+        idx = string.find("\pi")
 
         # Iterate over the string and find all occurrences of "\pi" with a valid previous character
         while idx != -1:
@@ -162,7 +161,7 @@ def handle_pi(string, pi):
                 string = string[:idx] + f"1*{pi}" + string[idx + 3 :]
 
             # Find the next occurrence of "\pi"
-            idx = string.find("\\pi", idx + 1)
+            idx = string.find("\pi", idx + 1)
 
         # Evaluate the expression using eval() function
         with contextlib.suppress(Exception):
@@ -172,8 +171,8 @@ def handle_pi(string, pi):
 
 
 def math_equal(
-    prediction: bool | float | str,
-    reference: float | str,
+    prediction: Union[bool, float, str],
+    reference: Union[float, str],
     include_percentage: bool = True,
     tolerance: float = 1e-4,
     timeout: float = 10.0,
@@ -225,9 +224,7 @@ def math_equal(
     prediction = format_intervals(prediction)
 
     pred_str, ref_str = prediction, reference
-    if (prediction.startswith("[") and prediction.endswith("]") and not reference.startswith("(")) or (
-        prediction.startswith("(") and prediction.endswith(")") and not reference.startswith("[")
-    ):
+    if (prediction.startswith("[") and prediction.endswith("]") and not reference.startswith("(")) or (prediction.startswith("(") and prediction.endswith(")") and not reference.startswith("[")):
         pred_str = pred_str.strip("[]()")
         ref_str = ref_str.strip("[]()")
     for s in ["{", "}", "(", ")"]:
@@ -237,22 +234,10 @@ def math_equal(
         return True
 
     ## [a, b] vs. [c, d], return a==c and b==d
-    if (
-        prediction
-        and reference
-        and prediction[0] in "(["
-        and prediction[-1] in ")]"
-        and prediction[0] == reference[0]
-        and prediction[-1] == reference[-1]
-    ):
+    if prediction and reference and prediction[0] in "([" and prediction[-1] in ")]" and prediction[0] == reference[0] and prediction[-1] == reference[-1]:
         pred_parts = prediction[1:-1].split(",")
         ref_parts = reference[1:-1].split(",")
-        if len(pred_parts) == len(ref_parts) and all(
-            [
-                math_equal(pred_pt, ref_pt, include_percentage, tolerance)
-                for pred_pt, ref_pt in zip(pred_parts, ref_parts, strict=True)
-            ]
-        ):
+        if len(pred_parts) == len(ref_parts) and all([math_equal(pred_pt, ref_pt, include_percentage, tolerance) for pred_pt, ref_pt in zip(pred_parts, ref_parts)]):
             return True
 
     if "," in prediction and "," in reference:
@@ -260,60 +245,33 @@ def math_equal(
         ref_parts = [item.strip() for item in reference.split(",")]
 
         if len(pred_parts) == len(ref_parts):
-            return bool(
-                all(
-                    [
-                        math_equal(pred_parts[i], ref_parts[i], include_percentage, tolerance)
-                        for i in range(len(pred_parts))
-                    ]
-                )
-            )
+            return bool(all([math_equal(pred_parts[i], ref_parts[i], include_percentage, tolerance) for i in range(len(pred_parts))]))
 
     # if we have point == tuple of values
     if prediction.startswith("Point") and reference[0] == "(" and reference[-1] == ")":
         pred_parts = prediction[prediction.find("(") + 1 : -1].split(",")
         ref_parts = reference[1:-1].split(",")
-        if len(pred_parts) == len(ref_parts) and all(
-            [
-                math_equal(pred_pt, ref_pt, include_percentage, tolerance)
-                for pred_pt, ref_pt in zip(pred_parts, ref_parts, strict=False)
-            ]
-        ):
+        if len(pred_parts) == len(ref_parts) and all([math_equal(pred_pt, ref_pt, include_percentage, tolerance) for pred_pt, ref_pt in zip(pred_parts, ref_parts)]):
             return True
 
     # if reference is a matrix
-    if r"\begin{pmatrix}" in reference and prediction.startswith("Matrix"):
+    if "\begin{pmatrix}" in reference and prediction.startswith("Matrix"):
         try:
             pred_matrix = parse_expr(prediction)
             ref_matrix_items = reference.split()[1:-1:2]
-            if len(pred_matrix) == len(ref_matrix_items) and all(
-                [
-                    math_equal(pred, ref, include_percentage, tolerance)
-                    for ref, pred in zip(ref_matrix_items, pred_matrix, strict=False)
-                ]
-            ):
+            if len(pred_matrix) == len(ref_matrix_items) and all([math_equal(pred, ref, include_percentage, tolerance) for ref, pred in zip(ref_matrix_items, pred_matrix)]):
                 return True
         except Exception:
             pass
-    elif r"\begin{pmatrix}" in reference and prediction.startswith("[") and prediction.endswith("]"):
+    elif "\begin{pmatrix}" in reference and prediction.startswith("[") and prediction.endswith("]"):
         if isinstance(eval(prediction), list):
             try:
                 pred_matrix = eval(prediction)
                 # ref_matrix_items = reference.split()[1:-1:2]
-                ref_matrix_items = (
-                    reference.removeprefix(r"\\begin{pmatrix}")
-                    .removeprefix(r"\begin{pmatrix}")
-                    .removesuffix(r"\\end{pmatrix}")
-                    .removesuffix(r"\end{pmatrix}")
-                )
+                ref_matrix_items = reference.lstrip("\\begin{pmatrix}").lstrip("\begin{pmatrix}").rstrip("\\end{pmatrix}").rstrip("\end{pmatrix}")  # noqa: B005
                 ref_matrix_items = ref_matrix_items.split("\\")
                 ref_matrix_items = [row.split("&") if "&" in row else row for row in ref_matrix_items]
-                if len(pred_matrix) == len(ref_matrix_items) and all(
-                    [
-                        math_equal(pred, ref, include_percentage, tolerance)
-                        for ref, pred in zip(ref_matrix_items, pred_matrix, strict=False)
-                    ]
-                ):
+                if len(pred_matrix) == len(ref_matrix_items) and all([math_equal(pred, ref, include_percentage, tolerance) for ref, pred in zip(ref_matrix_items, pred_matrix)]):
                     return True
             except Exception:
                 pass

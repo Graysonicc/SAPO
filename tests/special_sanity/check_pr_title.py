@@ -19,17 +19,11 @@ import re
 pr_title = os.environ.get("PR_TITLE", "").strip()
 
 # Define rules
-allowed_modules = ["fsdp", "megatron", "veomni", "sglang", "vllm", "trtllm", "rollout", "trainer"]
+allowed_modules = ["fsdp", "megatron", "sglang", "vllm", "rollout", "trainer"]
 allowed_modules += ["tests", "training_utils", "recipe", "hardware", "deployment"]
 allowed_modules += ["ray", "worker", "single_controller", "misc", "docker", "ci"]
-allowed_modules += ["perf", "model", "algo", "env", "tool", "ckpt", "doc", "data", "cfg", "reward"]
-allowed_modules += ["fully_async", "one_step_off"]
+allowed_modules += ["perf", "model", "algo", "env", "tool", "ckpt", "doc", "data", "cfg"]
 allowed_types = ["feat", "fix", "refactor", "chore", "test"]
-
-# Check for [1/N] prefix and extract the rest of the title
-progress_match = re.match(r"^\[\d/[\dNn]\]\s*(.+)$", pr_title, re.IGNORECASE)
-if progress_match:
-    pr_title = progress_match.group(1).strip()
 
 # Check for [BREAKING] prefix and extract the rest of the title
 breaking_match = re.match(r"^\[BREAKING\]\s*(.+)$", pr_title, re.IGNORECASE)
@@ -49,7 +43,7 @@ if not re_modules:
     print(f"Allowed modules: {', '.join(allowed_modules)}")
     raise Exception("Invalid PR title")
 else:
-    modules = re.findall(r"[a-z_]+", re_modules.group(1).lower())
+    modules = re.findall(r"[a-z]+", re_modules.group(1).lower())
     if not all(module in allowed_modules for module in modules):
         invalid_modules = [module for module in modules if module not in allowed_modules]
         print(f"❌ Invalid modules: {', '.join(invalid_modules)}")

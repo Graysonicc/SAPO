@@ -49,15 +49,7 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.autosectionlabel",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
 ]
-
-# MyST-Parser settings
-myst_enable_extensions = [
-    "dollarmath",  # Enables $...$ and $$...$$ syntax
-    "amsmath",  # Enables amsmath environments
-]
-
 # Use Google style docstrings instead of NumPy docstrings.
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
@@ -100,14 +92,6 @@ html_static_path = ["_static"]
 # Add the JavaScript file
 html_js_files = [
     "js/runllm-widget.js",
-    "js/resizable-sidebar.js",
 ]
 
-# Add custom CSS file for full-width layout
-html_css_files = [
-    "custom.css",
-]
-
-exclude_patterns += ["README.md", "README_vllm0.7.md"]
-
-suppress_warnings = ["ref.duplicate", "ref.myst"]
+exclude_patterns = ["README.md", "README_vllm0.7.md"]

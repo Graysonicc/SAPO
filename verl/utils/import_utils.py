@@ -16,12 +16,9 @@ Utilities to check if packages are available.
 We assume package availability won't change during runtime.
 """
 
-import importlib
 import importlib.util
-import os
-import warnings
-from functools import cache, wraps
-from typing import Optional
+from functools import cache
+from typing import List, Optional
 
 
 @cache
@@ -69,82 +66,39 @@ def is_trl_available():
     return trl_spec is not None
 
 
-@cache
-def is_msprobe_available():
-    try:
-        msprobe_spec = importlib.util.find_spec("msprobe")
-    except ModuleNotFoundError:
-        msprobe_spec = None
-    return msprobe_spec is not None
-
-
 def import_external_libs(external_libs=None):
     if external_libs is None:
         return
-    if not isinstance(external_libs, list):
+    if not isinstance(external_libs, List):
         external_libs = [external_libs]
+    import importlib
 
     for external_lib in external_libs:
         importlib.import_module(external_lib)
 
 
-PKG_PATH_PREFIX = "pkg://"
-FILE_PATH_PREFIX = "file://"
+def load_extern_type(file_path: Optional[str], type_name: Optional[str]):
+    """Load a external data type based on the file path and type name"""
+    import importlib.util
+    import os
 
-
-def load_module(module_path: str, module_name: Optional[str] = None) -> object:
-    """Load a module from a path.
-
-    Args:
-        module_path (str):
-            The path to the module. Either
-                - `pkg_path`, e.g.,
-                    - "pkg://verl.utils.dataset.rl_dataset"
-                    - "pkg://verl/utils/dataset/rl_dataset"
-                - or `file_path` (absolute or relative), e.g.,
-                    - "file://verl/utils/dataset/rl_dataset.py"
-                    - "/path/to/verl/utils/dataset/rl_dataset.py"
-        module_name (str, optional):
-            The name of the module to added to ``sys.modules``. If not provided, the module will not be added,
-                thus will not be cached and directly ``import``able.
-    """
-    if not module_path:
+    if not file_path:
         return None
 
-    if module_path.startswith(PKG_PATH_PREFIX):
-        module_name = module_path[len(PKG_PATH_PREFIX) :].replace("/", ".")
-        module = importlib.import_module(module_name)
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Custom type file '{file_path}' not found.")
 
-    else:
-        if module_path.startswith(FILE_PATH_PREFIX):
-            module_path = module_path[len(FILE_PATH_PREFIX) :]
+    spec = importlib.util.spec_from_file_location("custom_module", file_path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(f"Error loading module from '{file_path}'") from e
 
-        if not os.path.exists(module_path):
-            raise FileNotFoundError(f"Custom module file not found: {module_path=}")
+    if not hasattr(module, type_name):
+        raise AttributeError(f"Custom type '{type_name}' not found in '{file_path}'.")
 
-        # Use the provided module_name for the spec, or derive a unique name to avoid collisions.
-        spec_name = module_name or f"custom_module_{hash(os.path.abspath(module_path))}"
-        spec = importlib.util.spec_from_file_location(spec_name, module_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load module from {module_path=}")
-
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except Exception as e:
-            raise RuntimeError(f"Error loading module from {module_path=}") from e
-
-        if module_name is not None:
-            import sys
-
-            # Avoid overwriting an existing module with a different object.
-            if module_name in sys.modules and sys.modules[module_name] is not module:
-                raise RuntimeError(
-                    f"Module name '{module_name}' already in `sys.modules` and points to a different module."
-                )
-            sys.modules[module_name] = module
-
-    return module
+    return getattr(module, type_name)
 
 
 def _get_qualified_name(func):
@@ -155,90 +109,21 @@ def _get_qualified_name(func):
 
 
 def deprecated(replacement: str = ""):
-    """Decorator to mark functions or classes as deprecated."""
+    """Decorator to mark APIs as deprecated."""
+    import functools
+    import warnings
 
-    def decorator(obj):
-        qualified_name = _get_qualified_name(obj)
+    def decorator(func):
+        qualified_name = _get_qualified_name(func)
 
-        if isinstance(obj, type):
-            original_init = obj.__init__
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            msg = f"Warning: API '{qualified_name}' is deprecated."
+            if replacement:
+                msg += f" Please use '{replacement}' instead."
+            warnings.warn(msg, category=DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
 
-            @wraps(original_init)
-            def wrapped_init(self, *args, **kwargs):
-                msg = f"Warning: Class '{qualified_name}' is deprecated."
-                if replacement:
-                    msg += f" Please use '{replacement}' instead."
-                warnings.warn(msg, category=FutureWarning, stacklevel=2)
-                return original_init(self, *args, **kwargs)
-
-            obj.__init__ = wrapped_init
-            return obj
-
-        else:
-
-            @wraps(obj)
-            def wrapped(*args, **kwargs):
-                msg = f"Warning: Function '{qualified_name}' is deprecated."
-                if replacement:
-                    msg += f" Please use '{replacement}' instead."
-                warnings.warn(msg, category=FutureWarning, stacklevel=2)
-                return obj(*args, **kwargs)
-
-            return wrapped
+        return wrapped
 
     return decorator
-
-
-def load_extern_object(module_path: str, object_name: str) -> object:
-    """Load an object from a module path.
-
-    Args:
-        module_path (str): See :func:`load_module`.
-        object_name (str):
-            The name of the object to load with ``getattr(module, object_name)``.
-    """
-    module = load_module(module_path)
-
-    if not hasattr(module, object_name):
-        raise AttributeError(f"Object not found in module: {object_name=}, {module_path=}.")
-
-    return getattr(module, object_name)
-
-
-def load_class_from_fqn(fqn: str, description: str = "class") -> type:
-    """Load a class from its fully qualified name.
-
-    Args:
-        fqn: Fully qualified class name (e.g., 'mypackage.module.ClassName').
-        description: Description for error messages (e.g., 'AgentLoopManager').
-
-    Returns:
-        The loaded class.
-
-    Raises:
-        ValueError: If fqn format is invalid (missing dot separator).
-        ImportError: If the module cannot be imported.
-        AttributeError: If the class is not found in the module.
-
-    Example:
-        >>> cls = load_class_from_fqn("verl.experimental.agent_loop.AgentLoopManager")
-        >>> instance = cls(config=config, ...)
-    """
-    if "." not in fqn:
-        raise ValueError(
-            f"Invalid {description} '{fqn}'. Expected fully qualified class name (e.g., 'mypackage.module.ClassName')."
-        )
-    try:
-        module_path, class_name = fqn.rsplit(".", 1)
-        module = importlib.import_module(module_path)
-        return getattr(module, class_name)
-    except ImportError as e:
-        raise ImportError(f"Failed to import module '{module_path}' for {description}: {e}") from e
-    except AttributeError as e:
-        raise AttributeError(f"Class '{class_name}' not found in module '{module_path}': {e}") from e
-
-
-@deprecated(replacement="load_module(file_path); getattr(module, type_name)")
-def load_extern_type(file_path: str, type_name: str) -> type:
-    """DEPRECATED. Directly use `load_extern_object` instead."""
-    return load_extern_object(file_path, type_name)

@@ -1,8 +1,6 @@
 Data interface
 =========================
 
-Last updated: 05/19/2025 (API docstrings are auto-generated).
-
 DataProto is the interface for data exchange.
 
 The :class:`verl.DataProto` class contains two key members:
@@ -51,7 +49,7 @@ One can also index a tensordict along its batch_size. The contents of the Tensor
 
 For more about :class:`tensordict.TensorDict` usage, see the official tensordict_ documentation.
 
-.. _tensordict: https://pytorch.org/tensordict/stable/overview.html
+.. _tensordict: https://pytorch.org/tensordict/overview.html
 
 
 Core APIs

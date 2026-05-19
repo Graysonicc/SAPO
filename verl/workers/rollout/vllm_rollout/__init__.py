@@ -14,7 +14,7 @@
 import os
 from importlib.metadata import PackageNotFoundError, version
 
-from .vllm_rollout import ServerAdapter  # noqa: F401
+from packaging.version import Version
 
 
 def get_version(pkg):
@@ -27,10 +27,7 @@ def get_version(pkg):
 vllm_package_name = "vllm"
 vllm_package_version = get_version(vllm_package_name)
 if vllm_package_version is None:
-    raise PackageNotFoundError(
-        "To use vllm rollout, please ensure the 'vllm' package is properly installed. See "
-        "https://verl.readthedocs.io/en/latest/start/install.html for more details"
-    )
+    raise PackageNotFoundError("To use vllm rollout, please ensure the 'vllm' package is properly installed. See https://verl.readthedocs.io/en/latest/start/install.html for more details")
 
 if "ROCM_PATH" in os.environ:
     import re
@@ -40,3 +37,12 @@ if "ROCM_PATH" in os.environ:
         vllm_package_version = match.group(1)
     else:
         raise ValueError(f"Warning: Could not parse version format: {vllm_package_version}")
+###
+
+if Version(vllm_package_version) <= Version("0.6.3"):
+    vllm_mode = "customized"
+    from .fire_vllm_rollout import FIREvLLMRollout  # noqa: F401
+    from .vllm_rollout import vLLMRollout  # noqa: F401
+else:
+    vllm_mode = "spmd"
+    from .vllm_rollout_spmd import vLLMAsyncRollout, vLLMRollout  # noqa: F401

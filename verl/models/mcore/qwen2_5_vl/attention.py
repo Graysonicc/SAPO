@@ -21,8 +21,7 @@ from .rope_utils import apply_rotary_pos_emb_absolute
 
 class Qwen2_5VLSelfAttention(SelfAttention):
     """
-    Overrides the SelfAttention class, the difference is that qwen2_5_vl uses apply_rotary_pos_emb_absolute
-    instead of apply_rotary_pos_emb
+    Overrides the SelfAttention class, the difference is that qwen2_5_vl uses apply_rotary_pos_emb_absolute instead of apply_rotary_pos_emb
     """
 
     def forward(
@@ -39,7 +38,6 @@ class Qwen2_5VLSelfAttention(SelfAttention):
         sequence_len_offset: Optional[int] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
-        rotary_pos_cos_sin: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
         """
         Perform a forward pass through the attention module.
@@ -67,9 +65,7 @@ class Qwen2_5VLSelfAttention(SelfAttention):
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
         if inference_context and inference_context.is_dynamic_batching():
-            assert flash_decode_and_prefill_kernel is not None, (
-                "Internal use only: install package `nvidia_chunked_flash_attn`."
-            )
+            assert flash_decode_and_prefill_kernel is not None, "Internal use only: install package `nvidia_chunked_flash_attn`."
 
         # hidden_states: [sq, b, h]
         if self.config.flash_decode and not self.training and inference_context is not None:
@@ -94,13 +90,7 @@ class Qwen2_5VLSelfAttention(SelfAttention):
 
         # This branch only runs in the decode phase of flash decoding and returns after the linear
         # projection. This conditional is not used in the prefill phase or non-flash-decoding cases.
-        if (
-            self.config.flash_decode
-            and inference_context is not None
-            and inference_context.is_decode_only()
-            and not self.training
-            and rotary_pos_cos is not None
-        ):
+        if self.config.flash_decode and inference_context is not None and inference_context.is_decode_only() and not self.training and rotary_pos_cos is not None:
             assert self.layer_number in inference_context.key_value_memory_dict
             assert inference_context.sequence_len_offset is not None
             inference_key_memory, inference_value_memory = inference_context.key_value_memory_dict[self.layer_number]
@@ -119,8 +109,7 @@ class Qwen2_5VLSelfAttention(SelfAttention):
             output, bias = self.linear_proj(context_layer)
             return output, bias
 
-        # Use latest mcore 0.13 API and forward-compatible with previous versions.
-        outputs = self._adjust_key_value_for_inference(
+        query, key, value, rotary_pos_emb, attn_mask_type = self._adjust_key_value_for_inference(
             inference_context,
             query,
             key,
@@ -130,8 +119,6 @@ class Qwen2_5VLSelfAttention(SelfAttention):
             rotary_pos_sin,
             sequence_len_offset,
         )
-
-        query, key, value, rotary_pos_emb, attn_mask_type = outputs[:5]
 
         if packed_seq_params is not None:
             query = query.squeeze(1)
@@ -203,9 +190,7 @@ class Qwen2_5VLSelfAttention(SelfAttention):
                 cu_query_lengths, max_seqlen_q = inference_context.cu_query_lengths()
                 cu_kv_lengths, max_seqlen_k = inference_context.cu_kv_lengths()
 
-                core_attn_out = self.flash_decode_and_prefill(
-                    q, k, v, max_seqlen_q, max_seqlen_k, cu_query_lengths, cu_kv_lengths
-                )
+                core_attn_out = self.flash_decode_and_prefill(q, k, v, max_seqlen_q, max_seqlen_k, cu_query_lengths, cu_kv_lengths)
                 core_attn_out = core_attn_out.squeeze(0).unsqueeze(1)
                 core_attn_out = rearrange(core_attn_out, "s b h d -> s b (h d)")
 

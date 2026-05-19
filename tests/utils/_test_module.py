@@ -13,9 +13,9 @@
 # limitations under the License.
 
 
-# Test module for import_utils.load_extern_object testing
+# Test module for import_utils.load_extern_type testing
 class TestClass:
-    """A test class to be imported by load_extern_object"""
+    """A test class to be imported by load_extern_type"""
 
     def __init__(self, value=None):
         self.value = value or "default"

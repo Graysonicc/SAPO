@@ -1,9 +1,7 @@
 Performance Tuning Guide
 ==============================
 
-Last updated: 07/17/2025.
-
-Author: `Guangming Sheng <https://github.com/PeterSH6>`_, `Jiali Zheng <https://github.com/CurryRice233>`_
+Author: `Guangming Sheng <https://github.com/PeterSH6>`_
 
 In this section, we will discuss how to tune the performance of all the stages in verl, including:
 
@@ -19,10 +17,6 @@ In this section, we will discuss how to tune the performance of all the stages i
 
 6. LigerKernel for SFT performance optimization
 
-7. Forward prefetch in FSDP training backend
-
-8. Memory optimization for entropy calculation from logits
-
 Rollout Generation Tuning
 --------------------------
 
@@ -32,6 +26,7 @@ Below are key factors for tuning vLLM-based rollout. Before tuning, we recommend
 
 - Increase ``gpu_memory_utilization``.
 
+  - For vLLM v0.5.4 and v0.6.3, the vLLM pre-allocates GPU KVCache by using gpu_memory_utilization of the **remaining** memory. 
   - For vLLM v0.7.0 and later, the vLLM instance will only use gpu_memory_utilization of the **total** memory.
   - For SGLang, it's the fraction of the free GPU memory used for **static** memory like model weights and KV cache. However, the remaining (1-gpu_memory_utilization) will also be used during inference.
 
@@ -49,18 +44,12 @@ Below are key factors for tuning vLLM-based rollout. Before tuning, we recommend
   When GPU resources allow, a smaller tensor parallel size spawns more vLLM replicas. 
   Data parallelism (DP) can yield higher throughput than tensor parallelism (TP), but also increases KVCache consumption. 
   Carefully balance the trade-off between more replicas and higher memory usage.
-  Our experiment in Sec. 8.4 of `HybridFlow paper <https://arxiv.org/pdf/2409.19256v2>`_ evaluate this trade-off.
-
-- Balance performance and memory using ``cudagraph_capture_sizes``.
-  If ``cudagraph_capture_sizes`` is set, vLLM will try to capture the model execution graph for different batch sizes.
-  Since cudagraph memory can not be offloaded to cpu, The memory stay in gpu when update actor is running. 
-  Using smaller batch sizes can avoid OOM but slightly reduce throughput.
-  Must to set ``enforce_eager=False`` to use ``cudagraph_capture_sizes``.
+  Our experient in Sec. 8.4 of `HybridFlow paper <https://arxiv.org/pdf/2409.19256v2>`_ evaluate this trade-off.
 
 More tuning details such as dealing with Preemption and Chunked-prefill
 can be found in `vLLM official tuning guide <https://docs.vllm.ai/en/latest/performance/optimization.html>`_ 
 
-For optimal performance, we recommend using vLLM v0.8.3 or later. See https://github.com/verl-project/verl/blob/main/docs/README_vllm0.8.md for details.
+The performance of vllm can be further increased if upgrading from v0.6.3 to v0.7. See https://github.com/volcengine/verl/blob/main/docs/README_vllm0.7.md for details on how to upgrade.
 
 Enable remove padding (sequence packing)
 -----------------------------------------
@@ -69,14 +58,14 @@ Currently, for llama, mistral, gemma1 and qwen based models, users can enable `u
 sequence packing implementation provided by transformers library.
 
 For other models, transformers library may also support it but we haven't tested it yet.
-Users can add the desired model config to the  `test_transformer.py <https://github.com/verl-project/verl/blob/main/tests/models/test_transformer.py#L24>`_ file.
-And test its functionality by running the following command:
+Users can add the desired model config to the  `test_transformer.py <https://github.com/volcengine/verl/blob/main/tests/models/test_transformer.py#L24>`_ file.
+And test its functionaility by running the following command:
 
 .. code-block:: bash
 
   pytest -s tests/models/test_transformer.py
 
-If the test passes, you can add your desired model into the model `registry.py <https://github.com/verl-project/verl/blob/main/verl/models/registry.py#L24>`_ file.
+If the test passes, you can add your desired model into the model `registry.py <https://github.com/volcengine/verl/blob/main/verl/models/registry.py#L24>`_ file.
 Then, you can enjoy the performance boost of sequence packing
 and welcome to PR your tested model to verl!
 
@@ -90,10 +79,10 @@ users may need to tune the ``*micro_batch_size_per_gpu`` for different computati
 In verl, the core principle for setting batch sizes is:
 
 - **Algorithmic metrics** (train batch size, PPO mini-batch size) are *global* (from a single-controller perspective), 
-  normalized in each worker. See the `normalization code <https://github.com/verl-project/verl/blob/main/verl/workers/engine_workers.py>`_.
+  normalized in each worker. See the `normalization code <https://github.com/volcengine/verl/blob/main/verl/workers/fsdp_workers.py#L120-L122>`_.
 
 - **Performance-related parameters** (micro batch size, max token length for dynamic batch size) are *local* parameters that define the per-GPU data allocations. 
-  See the `normalization code <https://github.com/verl-project/verl/blob/main/verl/workers/engine_workers.py>`_.
+  See the `normalization code <https://github.com/volcengine/verl/blob/main/verl/workers/fsdp_workers.py#L127>`_.
 
 .. note:: In your training script, please use ``*micro_batch_size_per_gpu`` instead of ``*micro_batch_size``. 
   So that you don't need to consider the normalization of the ``micro_batch_size`` and ``micro_batch_size`` will be deprecated.
@@ -135,7 +124,7 @@ Instead, users should tune the following parameters:
   The maximum number of tokens to be processed in fwd and bwd of ``update_policy`` and ``update_critic``.
 
 - ``actor_rollout_ref.ref.log_prob_max_token_len_per_gpu`` and ``actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu``: 
-  The maximum number of tokens to be processed in a the fwd computation of ``compute_log_prob`` and ``compute_ref_log_prob``.
+  The maximum number of tokens to be processed in a the fwd computation of ``compute_log_prob`` and ``comptue_ref_log_prob``.
 
 - ``critic.forward_micro_batch_size_per_gpu``, ``reward_model.forward_micro_batch_size_per_gpu``: 
   The maximum number of tokens to be processed in a the fwd computation of ``compute_values``, ``compute_rm_score``.
@@ -146,15 +135,15 @@ Dynamic Batch Size Tuning tips
 Here're some tips to tune the above parameters:
 
 1. **Increase** ``actor_rollout_ref.actor.ppo_max_token_len_per_gpu``  
-   Make it at least 2 x (max_prompt_length + max_response_length). See `run_qwen3_8b_fsdp.sh <https://github.com/verl-project/verl/blob/main/examples/ppo_trainer/run_qwen3_8b_fsdp.sh>`_ for an example.
+   Make it at least 2 x (max_prompt_length + max_response_length). We set it to 3x in `run_qwen2-7b_rm_seq_balance.sh <https://github.com/volcengine/verl/blob/main/examples/ppo_trainer/run_qwen2-7b_rm_seq_balance.sh#L25>`_.
    Try to increase it to get higher throughput.
 
 2. **Forward-only parameters can be larger**: 
    Similar to the non-dynamic-batch scenario, forward-only token limits can exceed those used in forward/backward operations.
  
 3. **Use larger limits for Critic and Reward models**:
-   Critic and Reward parameters can be set at least 2× the Actor’s limits. See  
-   `run_qwen3_8b_fsdp.sh <https://github.com/verl-project/verl/blob/main/examples/ppo_trainer/run_qwen3_8b_fsdp.sh>`_ for an example.
+   Critic and Reward parameters can be set at least 2× the Actor’s limits. For instance, we set them to 4× here:  
+   `run_qwen2-7b_rm_seq_balance.sh <https://github.com/volcengine/verl/blob/main/examples/ppo_trainer/run_qwen2-7b_rm_seq_balance.sh#L40>`_
    
 .. :math:`\text{critic.ppo_max_token_len_per_gpu}  = 2 \times  \text{actor.ppo_max_token_len_per_gpu})`.
 
@@ -165,60 +154,21 @@ To utilize this technique, users can set ``ulysses_sequence_parallel_size>1`` in
 
 We support different model utilize different ulysses_sequence_parallel_size sizes.
 
-To train long sequence (>32k), users may need to decrease the ``*micro_batch_size_per_gpu`` and ``*max_token_len_per_gpu`` to avoid OOM.
+To train log sequence (>32k), users may need to decrease the ``*micro_batch_size_per_gpu`` and ``*max_token_len_per_gpu`` to avoid OOM.
 
-LigerKernel for training performance
---------------------------------------
+LigerKernel for SFT
+----------------------
 
-LigerKernel provides fused Triton kernels (RMSNorm, SwiGLU, RoPE) that can improve training throughput. It works with both SFT and RL (PPO/GRPO) training, including vision-language models.
+LigerKernel is a high-performance kernel for Supervised Fine-Tuning (SFT) that can improve training efficiency. To enable LigerKernel in your SFT training:
 
-1. Install liger-kernel via ``pip3 install liger-kernel``. Set ``use_liger`` in your configuration:
+1. Install liger-kernel via ``pip3 install liger-kernel``. In your SFT configuration file (e.g., ``verl/trainer/config/sft_trainer.yaml``), set the ``use_liger`` parameter:
 
    .. code-block:: yaml
 
       model:
-        use_liger: True  # Enable LigerKernel
+        use_liger: True  # Enable LigerKernel for SFT
 
-2. The default value is ``False``. When enabled, verl applies Liger's fused RMSNorm, SwiGLU, and RoPE kernels to the model. The ``fused_linear_cross_entropy`` optimization is disabled because verl computes log-probabilities via its own path.
+2. The default value is ``False``. Enable it only when you want to use LigerKernel's optimizations.
 
-3. ``use_liger`` is compatible with ``use_fused_kernels`` — they operate at different levels (Liger optimizes model internals, fused kernels optimize the output head). Using both together gives the best speed-memory tradeoff.
+3. LigerKernel is particularly useful for improving training performance in SFT scenarios.
 
-Forward prefetch in FSDP training backend
-----------------------
-
-During the training phase, users can enable forward prefetching in FSDP by setting ``fsdp_config.forward_prefetch=True``. For example, ``actor_rollout_ref.actor.fsdp_config.forward_prefetch=True``. This configuration prefetches the next forward-pass all-gather operation before completing the current forward computation, overlapping communication with computation and improving efficiency. For further details, refer to the `FSDP forward_prefetch <https://docs.pytorch.org/docs/stable/fsdp.html#module-torch.distributed.fsdp>`_ documentation.
-
-.. note::
-    Backward prefetch is unsupported because the ``BACKWARD_POST`` policy may prefetch incorrectly in nested-module cases. For details, see the `FSDP documentation <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md?plain=1#L70>`_
-
-Migrating to FSDP2
-----------------------
-
-FSDP2 offers notable improvements over FSDP1. According to `PyTorch TorchTitan benchmarks <https://arxiv.org/abs/2410.06511v1>`_:
-
-- 7% lower GPU memory usage on average
-- 1.5% throughput improvement with BF16 training
-- Better composability with DTensor and per-parameter sharding
-
-**Enabling FSDP2 in VERL:**
-
-   .. code-block:: python
-
-    # Enable FSDP2 in actor configuration
-    actor_rollout_ref.actor.strategy="fsdp2"
-
-.. note:: 
-   FSDP2 requires PyTorch 2.1+ and is recommended for models with transformer architecture.
-
-Memory optimization for entropy calculation from logits
-----------------------
-
-The ``logits`` tensor (typically of shape ``[bsz*seq_len, voc]``) can consume significant memory. When using ``compute_entropy_from_logits``, memory usage reaches approximately ``[bsz*seq_len, voc] × (4 bytes (float32) + 2 bytes (autocast for softmax+logsumexp) + 1 byte (softmax output))``.
-
-To reduce this memory peak, enable chunked computation by setting:
-``actor_rollout_ref.ref.entropy_from_logits_with_chunking = True``
-This processes the tensor in chunks of shape ``[chunk_size, voc]`` (e.g., 2048) rather than the full sequence length, exclusively during the model's forward pass.
-
-Additionally, during training, standard gradient checkpointing (``enable_gradient_checkpointing=True``) does not apply to entropy calculations. To reduce memory peaks in this context, set:
-``actor_rollout_ref.actor.entropy_checkpointing = True``
-This enables entropy recomputation specifically for the entropy calculation, lowering memory usage during training.

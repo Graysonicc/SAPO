@@ -149,10 +149,7 @@ def copy_to_shm(src: str):
     dest = os.path.join(dest, os.path.basename(src_abs))
     if os.path.exists(dest) and verify_copy(src, dest):
         # inform user and depends on him
-        print(
-            f"[WARNING]: The memory model path {dest} already exists. If it is not you want, please clear it and "
-            f"restart the task."
-        )
+        print(f"[WARNING]: The memory model path {dest} already exists. If it is not you want, please clear it and restart the task.")
     else:
         if os.path.isdir(src):
             shutil.copytree(src, dest, symlinks=False, dirs_exist_ok=True)
@@ -192,13 +189,11 @@ def _check_directory_structure(folder_path, record_file):
     return existing_entries == recorded_entries
 
 
-def copy_to_local(
-    src: str, cache_dir=None, filelock=".file.lock", verbose=False, always_recopy=False, use_shm: bool = False
-) -> str:
+def copy_to_local(src: str, cache_dir=None, filelock=".file.lock", verbose=False, always_recopy=False, use_shm: bool = False) -> str:
     """Copy files/directories from HDFS to local cache with validation.
 
     Args:
-        src (str): Source path - HDFS path (hdfs://...), local filesystem path, or Hugging Face model ID
+        src (str): Source path - HDFS path (hdfs://...) or local filesystem path
         cache_dir (str, optional): Local directory for cached files. Uses system tempdir if None
         filelock (str): Base name for file lock. Defaults to ".file.lock"
         verbose (bool): Enable copy operation logging. Defaults to False
@@ -210,28 +205,13 @@ def copy_to_local(
     """
     # Save to a local path for persistence.
     local_path = copy_local_path_from_hdfs(src, cache_dir, filelock, verbose, always_recopy)
-
-    if use_shm and isinstance(local_path, str) and not os.path.exists(local_path):
-        try:
-            from huggingface_hub import snapshot_download
-
-            resolved = snapshot_download(local_path)
-            if isinstance(resolved, str) and os.path.exists(resolved):
-                local_path = resolved
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"WARNING: Failed to download model from Hugging Face: {e}")
-
     # Load into shm to improve efficiency.
     if use_shm:
         return copy_to_shm(local_path)
     return local_path
 
 
-def copy_local_path_from_hdfs(
-    src: str, cache_dir=None, filelock=".file.lock", verbose=False, always_recopy=False
-) -> str:
+def copy_local_path_from_hdfs(src: str, cache_dir=None, filelock=".file.lock", verbose=False, always_recopy=False) -> str:
     """Deprecated. Please use copy_to_local instead."""
     from filelock import FileLock
 

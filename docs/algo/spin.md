@@ -1,7 +1,5 @@
 # Recipe: Self-Play Fine-Tuning (SPIN)
 
-Last updated: 05/31/2025.
-
 `verl` provides a recipe inspired by the paper **"Self-Play Fine-Tuning Converts Weak Language Models to Strong Language Models"** (SPIN). SPIN is a language model finetuning algorithm that enables iterative self-improvement through a self-play mechanism inspired by game theory.
 
 **Core Idea:** Models learn by playing against themselves, reducing reliance on external preference datasets or stronger teacher models:
@@ -97,7 +95,7 @@ The following steps outline how to set up the environment and run the SPIN recip
     ```bash
     # Clone the verl repository and checkout the spin branch
     cd ~
-    git clone git@github.com:verl-project/verl.git && cd verl
+    git clone git@github.com:volcengine/verl.git && cd verl
 
     # Install flash-attn (handle potential build issues)
     python3 -m uv pip install wheel packaging
@@ -115,15 +113,15 @@ The following steps outline how to set up the environment and run the SPIN recip
     # wandb login
 
     # Download the GSM8K dataset
-    python3 examples/data_preprocess/gsm8k.py --local_save_dir ~/data/gsm8k # Adjusted path
+    python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k # Adjusted path
 
     # Download the base model (Example: Qwen2.5-3B-Instruct)
-    hf download Qwen/Qwen2.5-3B-Instruct --local-dir $HOME/models/Qwen2.5-3B-Instruct
+    huggingface-cli download Qwen/Qwen2.5-3B-Instruct --local-dir $HOME/models/Qwen2.5-3B-Instruct
     ```
 
 4.  **Configure:**
     * Modify the configuration file (e.g., `config/spin_trainer.yaml` or the one specified in the run script) with correct paths to your downloaded model, data, desired hyperparameters (`dpo_beta`, learning rate, etc.), and distributed training settings (nodes, GPUs per node).
-    * Pay attention to `actor_rollout_ref.model`, `data` paths, `reward_model` config (if using one), and `trainer.ref_update_freq`.
+    * Pay attention to `actor_rollout_ref.model_path`, `data` paths, `reward_model` config (if using one), and `trainer.ref_update_freq`.
 
 5.  **Run Training:**
     ```bash
