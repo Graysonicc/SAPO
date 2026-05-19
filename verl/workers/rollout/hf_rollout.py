@@ -85,7 +85,9 @@ class HFRollout(BaseRollout):
                 "top_p": top_p,
                 "top_k": top_k,
                 "temperature": temperature,
-                "num_return_sequences": self.config.n,
+                # already repeat in ray_trainer
+                # https://github.com/verl-project/verl/blob/2fdfbdcba6f2e076f64bc47922d8fe6cf7dc7da5/verl/trainer/ppo/ray_trainer.py#L1117
+                "num_return_sequences": 1,
             }
 
         # make config according to generate mode
@@ -152,7 +154,9 @@ class HFRollout(BaseRollout):
         response_position_ids = position_ids[:, -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
 
-        response_attention_mask = get_response_mask(response_id=response, eos_token=eos_token_id, dtype=attention_mask.dtype)
+        response_attention_mask = get_response_mask(
+            response_id=response, eos_token=eos_token_id, dtype=attention_mask.dtype
+        )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
         batch = TensorDict(

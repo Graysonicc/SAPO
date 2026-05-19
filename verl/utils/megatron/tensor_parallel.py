@@ -16,7 +16,7 @@
 Utilities for using tensor_parallel in megatron
 """
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from megatron.core import ModelParallelConfig
 
 
-def update_kwargs_with_config(dictionary: Dict, config: "ModelParallelConfig"):
+def update_kwargs_with_config(dictionary: dict, config: "ModelParallelConfig"):
     dictionary["config"] = config
     return dictionary
 
@@ -151,6 +151,34 @@ def vocab_parallel_entropy(vocab_parallel_logits: torch.Tensor) -> torch.Tensor:
     return _VocabParallelEntropy.apply(vocab_parallel_logits)
 
 
+def vocab_parallel_sum_pi_squared(vocab_parallel_logits: torch.Tensor) -> torch.Tensor:
+    """Compute Σπ² (sum of squared probabilities) when logits are sharded across tp ranks.
+
+    Used by ``optimal_token_baseline`` advantage estimators as the path-variance proxy:
+    ``w_t = 1 - 2*π_t + Σπ²``.
+
+    Args:
+        vocab_parallel_logits: (..., vocab_size // tp_size)
+
+    Returns: (...,)
+
+    Implementation is non-destructive (does not mutate ``vocab_parallel_logits``) so it
+    can be safely called before ``vocab_parallel_entropy`` / ``vocab_parallel_log_probs``
+    which would otherwise consume the same tensor.
+    """
+    tp_group = mpu.get_tensor_model_parallel_group()
+
+    logits_max = vocab_parallel_logits.max(dim=-1, keepdim=True).values
+    dist.all_reduce(logits_max, op=dist.ReduceOp.MAX, group=tp_group)
+    shifted = vocab_parallel_logits - logits_max
+    exp_shifted = shifted.exp()
+    sum_exp = exp_shifted.sum(dim=-1, keepdim=True)
+    dist.all_reduce(sum_exp, group=tp_group)
+    sum_exp_squared = exp_shifted.pow(2).sum(dim=-1, keepdim=True)
+    dist.all_reduce(sum_exp_squared, group=tp_group)
+    return (sum_exp_squared / sum_exp.pow(2)).squeeze(dim=-1)
+
+
 def vocab_parallel_log_probs_from_logits(logits, labels):
     """TODO(zhangchi.usc1992): We may change the implementation later"""
     from megatron.core import tensor_parallel
@@ -159,7 +187,8 @@ def vocab_parallel_log_probs_from_logits(logits, labels):
 
 
 def vocab_parallel_log_probs_from_logits_response_rmpad(input_ids, attention_mask, logits_rmpad, response_length):
-    """Similar to log_probs_from_logits_response_rmpad, but the logits_rmpad is now spliited across tensor parallel region.
+    """Similar to log_probs_from_logits_response_rmpad, but the logits_rmpad is now spliited across tensor parallel
+    region.
     This will further reduce the peak memory usage during training
 
     Args:
@@ -175,7 +204,11 @@ def vocab_parallel_log_probs_from_logits_response_rmpad(input_ids, attention_mas
     input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask=attention_mask)
     input_ids_rmpad = input_ids_rmpad.squeeze(-1)
     input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=0)
-    full_log_probs_rmpad = vocab_parallel_log_probs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)  # (total_nnz,)
-    full_output = pad_input(hidden_states=full_log_probs_rmpad.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen)
+    full_log_probs_rmpad = vocab_parallel_log_probs_from_logits(
+        logits=logits_rmpad, labels=input_ids_rmpad_rolled
+    )  # (total_nnz,)
+    full_output = pad_input(
+        hidden_states=full_log_probs_rmpad.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
+    )
     output = full_output.squeeze(-1)[:, -response_length - 1 : -1]  # [batch_size, response_length]
     return output

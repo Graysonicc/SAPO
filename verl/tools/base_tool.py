@@ -12,15 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib
 import json
-import sys
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 from uuid import uuid4
 
-from omegaconf import OmegaConf
+from verl.utils.rollout_trace import rollout_trace_op
 
-from .schemas import OpenAIFunctionToolSchema
+from .schemas import OpenAIFunctionToolSchema, ToolResponse
 
 
 class BaseTool:
@@ -28,7 +26,7 @@ class BaseTool:
 
     A tool should support the following methods:
 
-    - `to_openai_function_tool_schema`: return the tool schema in OpenAI format.
+    - `get_openai_tool_schema`: return the tool schema in OpenAI format.
     - `create`: create a tool instance for a trajectory.
     - `execute`: execute the tool.
     - `calc_reward`: calculate the reward respect to tool state.
@@ -45,7 +43,7 @@ class BaseTool:
     def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema:
         return self.tool_schema
 
-    async def create(self, instance_id: Optional[str] = None, **kwargs) -> str:
+    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]:
         """Create a tool instance.
 
         Args:
@@ -53,13 +51,15 @@ class BaseTool:
 
         Returns:
             The instance id of the tool.
+            tool_creation_response: The response of the tool when creating the instance.
         """
         if instance_id is None:
-            return str(uuid4())
+            return str(uuid4()), ToolResponse()
         else:
-            return instance_id
+            return instance_id, ToolResponse()
 
-    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> Tuple[str, float, dict]:
+    @rollout_trace_op
+    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]:
         """Execute the tool.
 
         Args:
@@ -67,11 +67,11 @@ class BaseTool:
             parameters: The json string of the parameters of the tool.
 
         Returns: tool_response, tool_reward_score, tool_metrics
-            tool_response: The response str of the tool.
+            tool_response: The ToolResponse object containing text, image, and/or video content.
             tool_reward_score: The step reward score of the tool.
             tool_metrics: The metrics of the tool.
         """
-        return "Updated the tool state.", 0.0, {}
+        return ToolResponse(text="Updated the tool state."), 0.0, {}
 
     async def calc_reward(self, instance_id: str, **kwargs) -> float:
         """Calculate the reward of the tool.
@@ -91,42 +91,3 @@ class BaseTool:
             instance_id: The instance id of the tool.
         """
         pass
-
-
-def initialize_tools_from_config(tools_config_file) -> List[BaseTool]:
-    """Initialize tools from config file.
-
-    Args:
-        tools_config_file: The config file of the tools.
-
-    Returns:
-        A list of tools.
-    """
-    tools_config = OmegaConf.load(tools_config_file)
-
-    tool_list = []
-    for tool_config in tools_config.tools:
-        cls_name = tool_config.class_name
-        module_name, class_name = cls_name.rsplit(".", 1)
-
-        if module_name not in sys.modules:
-            spec = importlib.util.find_spec(module_name)
-            assert spec is not None, f"unable to find {cls_name}"
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-        else:
-            module = sys.modules[module_name]
-
-        tool_cls = getattr(module, class_name)
-
-        if tool_config.get("tool_schema", None) is None:
-            tool_schema = None
-        else:
-            tool_schema_dict = OmegaConf.to_container(tool_config.tool_schema, resolve=True)
-            tool_schema = OpenAIFunctionToolSchema.parse_obj(tool_schema_dict)
-
-        tool = tool_cls(config=OmegaConf.to_container(tool_config.config, resolve=True), tool_schema=tool_schema)
-        tool_list.append(tool)
-
-    return tool_list
